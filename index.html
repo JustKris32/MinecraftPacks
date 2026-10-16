@@ -145,6 +145,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 .pill.bad { color: var(--err); }
 .pill.warn { color: var(--warn); }
 
+/* Visitors do not see relay or CurseForge key settings. Add #setup to the page address to show them. */
+.lean .relay, .lean .cf { display: none !important; }
 .relay { border: 1px solid var(--line); background: var(--panel); }
 .relay summary { cursor: pointer; padding: 10px 14px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
 .relay summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -363,6 +365,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   const ROW_H = 34;
   // Hosting this page for other people? Put your relay address here so visitors do not have to type it.
   const DEFAULT_RELAY = 'https://yellow-queen-5f3d.toffermata.workers.dev';
+  // Visitors never see the relay or CurseForge key settings. Open the page with #setup on the end of the address to show them.
+  const LEAN = location.hash !== '#setup';
+  if (LEAN) document.documentElement.classList.add('lean');
+  const NO_CF = 'CurseForge lookups are not available right now. Please try again later.';
   const MB = 1024 * 1024;
 
   function fmtBytes(n) {
@@ -555,6 +561,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       const relay = String(S.relay || DEFAULT_RELAY).trim().replace(/\/+$/, '');
       if (/^https:\/\/[^/]+$/.test(relay) && await pingBase(relay)) { Net.helper = true; Net.base = relay; }
     }
+    // These hosts never allow direct downloads from a web page, so skip the attempt that is certain to fail.
+    if (Net.helper) ['edge.forgecdn.net', 'mediafilez.forgecdn.net', 'media.forgecdn.net', 'github.com'].forEach((h) => { Net.viaProxy[h] = true; });
     paintHelpers();
   }
   function helperText() {
@@ -603,7 +611,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       }
     }
     let msg = last && last.message ? last.message : 'download failed';
-    if (last instanceof TypeError) msg = Net.helper ? 'could not reach the download host' : 'blocked by the browser (this host needs the helper or a relay, see Relay settings)';
+    if (last instanceof TypeError) msg = Net.helper ? 'could not reach the download host' : (LEAN ? 'blocked by the browser' : 'blocked by the browser (this host needs the helper or a relay, see Relay settings)');
     throw new Error(msg);
   }
   async function verifyHashes(u8, hashes) {
@@ -664,14 +672,14 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
   async function cfApi(path, body) {
     const key = S.key.trim();
-    if (!key && !(Net.helper && Net.relayKey)) throw new Error('Enter your CurseForge API key first.');
+    if (!key && !(Net.helper && Net.relayKey)) throw new Error(LEAN ? NO_CF : 'Enter your CurseForge API key first.');
     if (key && !/^[\x21-\x7e]+$/.test(key)) throw new Error('The CurseForge API key has characters that are not allowed. Paste it again.');
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
     if (key) headers[Net.helper ? 'x-cf-key' : 'x-api-key'] = key;
     let res;
     try { res = await fetch((Net.helper ? Net.base + '/__packshift/cf' : 'https://api.curseforge.com') + path, { method: 'POST', headers, body: JSON.stringify(body) }); }
-    catch (e) { throw new Error(Net.helper ? 'Could not reach CurseForge.' : 'The browser blocked the request to CurseForge. Run the helper or add a relay in Relay settings.'); }
-    if (res.status === 401 || res.status === 403) throw new Error('CurseForge rejected the API key.');
+    catch (e) { throw new Error(LEAN ? NO_CF : (Net.helper ? 'Could not reach CurseForge.' : 'The browser blocked the request to CurseForge. Run the helper or add a relay in Relay settings.')); }
+    if (res.status === 401 || res.status === 403) throw new Error(LEAN ? NO_CF : 'CurseForge rejected the API key.');
     if (!res.ok) throw new Error('CurseForge answered with HTTP ' + res.status + '.');
     return (await res.json()).data || [];
   }
@@ -1092,7 +1100,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     $('#b-mc').value = m.minecraft.version || '';
     const l = cfLoader(m);
     if (l) setLoader(l.key, l.version); else { $('#b-loader').value = 'none'; $('#b-loaderver').value = ''; syncLoaderField(); }
-    showMsg('#b-note', 'Minecraft and loader versions were read from the manifest.' + (Net.helper ? '' : ' CurseForge needs the helper or a relay, see Relay settings.'), 'info');
+    showMsg('#b-note', 'Minecraft and loader versions were read from the manifest.' + (Net.helper || LEAN ? '' : ' CurseForge needs the helper or a relay, see Relay settings.'), 'info');
     lists.b.set([]); S.b.rows = [];
     $('#b-pack').hidden = false;
   }
@@ -1129,7 +1137,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     if (!name) return showMsg('#b-result', 'Enter a pack name.', 'err');
     if (!mc) return showMsg('#b-result', 'Enter the Minecraft version, for example 1.20.1.', 'err');
     if (loader !== 'none' && !loaderVer) return showMsg('#b-result', 'Enter the loader version, for example 0.15.7.', 'err');
-    if (src.kind === 'cf' && !S.key.trim() && !(Net.helper && Net.relayKey)) return showMsg('#b-result', 'Enter your CurseForge API key first.', 'err');
+    if (src.kind === 'cf' && !S.key.trim() && !(Net.helper && Net.relayKey)) return showMsg('#b-result', LEAN ? NO_CF : 'Enter your CurseForge API key first.', 'err');
 
     st.ctl = newCtl(); const ctl = st.ctl;
     hide('#b-result'); hide('#b-save'); st.blob = null;
@@ -1355,12 +1363,12 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     if (Net.helper && (S.key.trim() || Net.relayKey)) { await lookupCf(tok); return; }
     $('#c-lookup').hidden = false;
     showMsg('#c-note', (listed.length ? 'Names come from modlist.html (' + listed.length + ' entries; the manifest lists ' + m.files.length + ' files).' : 'This zip has no modlist.html, so only CurseForge IDs are shown.') +
-      ' Exact file names, versions and compatibility need a helper or relay and a CurseForge key. Set them in Relay settings, then press Look up.', 'info');
+      (LEAN ? ' Exact file names, versions and compatibility are not available right now.' : ' Exact file names, versions and compatibility need a helper or relay and a CurseForge key. Set them in Relay settings, then press Look up.'), 'info');
     if (!Net.helper) $('#relay').open = true;
   }
   async function lookupCf(tok) {
     const m = C.src.manifest;
-    if (!(Net.helper && (S.key.trim() || Net.relayKey))) return showMsg('#c-note', 'Connect a helper or relay and enter a CurseForge key first.', 'warn');
+    if (!(Net.helper && (S.key.trim() || Net.relayKey))) return showMsg('#c-note', LEAN ? NO_CF : 'Connect a helper or relay and enter a CurseForge key first.', 'warn');
     $('#c-lookup').disabled = true;
     $('#c-count').textContent = 'Asking CurseForge about ' + m.files.length + ' files…';
     try {
