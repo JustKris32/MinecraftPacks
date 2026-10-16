@@ -484,9 +484,11 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   }
 
   // Which side a mod runs on: 'client' only, 'server' only, 'both', or 'unknown'.
-  const SIDE_OPTS = [['all', 'All sides'], ['client', 'Client only'], ['server', 'Server only'], ['both', 'Both sides'], ['unknown', 'Not known']];
+  const SIDE_OPTS = [['all', 'All sides'], ['client', 'Client side'], ['server', 'Server side'], ['both', 'Both sides only'], ['unknown', 'Not known']];
   const SIDE_SHORT = { client: 'client', server: 'server', both: 'both' };
   const sideKey = (it) => (it && it.side) || 'unknown';
+  // A mod that runs on both sides belongs under Client side and under Server side.
+  const sideMatch = (it, v) => { const k = sideKey(it); return v === 'all' || k === v || (k === 'both' && (v === 'client' || v === 'server')); };
   function sideFrom(c, sv) {
     c = c || ''; sv = sv || '';
     if (!c && !sv) return 'unknown';
@@ -498,19 +500,20 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   function fillSides(k, items) {
     const sel = $('#' + k + '-side'), n = { client: 0, server: 0, both: 0, unknown: 0 };
     items.forEach((it) => { n[sideKey(it)]++; });
-    const sig = [items.length, n.client, n.server, n.both, n.unknown].join(',');
+    const cnt = { all: items.length, client: n.client + n.both, server: n.server + n.both, both: n.both, unknown: n.unknown };
+    const sig = [cnt.all, cnt.client, cnt.server, cnt.both, cnt.unknown].join(',');
     if (sel.dataset.sig === sig) return;
     sel.dataset.sig = sig;
     const cur = sel.value || 'all';
     sel.textContent = '';
-    SIDE_OPTS.forEach(([v, t]) => { const o = el('option', '', t + ' (' + (v === 'all' ? items.length : n[v]) + ')'); o.value = v; sel.appendChild(o); });
+    SIDE_OPTS.forEach(([v, t]) => { const o = el('option', '', t + ' (' + cnt[v] + ')'); o.value = v; sel.appendChild(o); });
     sel.value = cur;
   }
 
   // Windowed list of rows.
   class VList {
     constructor(host) {
-      this.host = host; this.rows = []; this.raf = 0;
+      this.host = host; this.rows = []; this.raf = 0; this.sideView = '';
       this.inner = el('div', 'vin');
       host.appendChild(this.inner);
       host.addEventListener('scroll', () => this.sched(), { passive: true });
@@ -531,10 +534,11 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       const frag = document.createDocumentFragment();
       for (let i = s; i < e; i++) {
         const r = this.rows[i];
+        const sd = r.side === 'both' && (this.sideView === 'client' || this.sideView === 'server') ? this.sideView : r.side;   // a both-side mod reads as the side being viewed
         const d = el('div', 'vrow'); d.style.top = (i * ROW_H) + 'px'; d.setAttribute('role', 'listitem');
         const p = el('span', 'path', r.path); p.title = r.path;
         d.appendChild(p);
-        d.appendChild(el('span', 'side ' + (SIDE_SHORT[r.side] || ''), SIDE_SHORT[r.side] || ''));
+        d.appendChild(el('span', 'side ' + (SIDE_SHORT[sd] || ''), SIDE_SHORT[sd] || ''));
         d.appendChild(el('span', 'size', r.size || ''));
         d.appendChild(el('span', 'pill ' + (r.state || ''), r.label || ''));
         frag.appendChild(d);
@@ -1087,7 +1091,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     fillSides('a', st.rows);
     $('#a-sidebar').hidden = !st.rows.length;
     if (st.listShown) return;
-    const shown = v === 'all' ? st.rows : st.rows.filter((r) => sideKey(r) === v);
+    const shown = st.rows.filter((r) => sideMatch(r, v));
+    lists.a.sideView = v;
     lists.a.set(shown);
     $('#a-sidecount').textContent = v === 'all' ? '' : shown.length + ' of ' + st.rows.length + ' files' + (shown.length ? '' : ' have this side.');
   }
@@ -1355,7 +1360,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const st = S.b, v = $('#b-side').value || 'all';
     fillSides('b', st.rows);
     $('#b-sidebar').hidden = !st.rows.length;
-    const shown = v === 'all' ? st.rows : st.rows.filter((r) => sideKey(r) === v);
+    const shown = st.rows.filter((r) => sideMatch(r, v));
+    lists.b.sideView = v;
     lists.b.set(shown);
     $('#b-sidecount').textContent = v === 'all' ? '' : shown.length + ' of ' + st.rows.length + ' files' + (shown.length ? '' : ' have this side.');
   }
@@ -1644,7 +1650,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const q = $('#c-q').value.trim().toLowerCase(), t = $('#c-type').value;
     fillSides('c', C.items);
     const sv = $('#c-side').value || 'all';
-    C.shown = C.items.filter((it) => (sv === 'all' || sideKey(it) === sv) && (t === 'all' || (t === 'flag' ? !!it.flag : it.kind === t)) && (!q || (it.name + ' ' + it.file + ' ' + it.version).toLowerCase().indexOf(q) !== -1));
+    lists.c.sideView = sv;
+    C.shown = C.items.filter((it) => sideMatch(it, sv) && (t === 'all' || (t === 'flag' ? !!it.flag : it.kind === t)) && (!q || (it.name + ' ' + it.file + ' ' + it.version).toLowerCase().indexOf(q) !== -1));
     lists.c.set(C.shown.map(rowOf));
     $('#c-n1').textContent = String(C.items.length);
     $('#c-n3').textContent = String(C.items.filter((it) => it.flag).length);
