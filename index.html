@@ -861,7 +861,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   function resetA() {
     const st = S.a;
     ['#a-error', '#a-result', '#a-progress', '#a-pack', '#a-save', '#a-note'].forEach(hide);
-    st.blob = null; st.src = null; st.preview = null; st.resolved = null; st.rows = [];
+    st.blob = null; st.src = null; st.preview = null; st.resolved = null; st.rows = []; st.listShown = false;
   }
   wireDrop($('#a-drop'), $('#a-file'), async (file) => {
     const st = S.a;
@@ -906,14 +906,29 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       total += it.size || 0;
     });
     $('#a-size').textContent = fmtBytes(total);
-    lists.a.sched();
+    if (st.listShown) { st.listShown = false; lists.a.set(st.rows); } else lists.a.sched();
+  }
+  // Fallback when CurseForge cannot be reached: list the names from modlist.html, as the Inspect tab does.
+  // That file has no IDs, so these rows are for reading only. The real rows return when the lookup or build runs.
+  async function showListedA(src) {
+    const mlPath = src.names.find((n) => /(^|\/)modlist\.html$/i.test(n));
+    if (!mlPath) return false;
+    let listed = [];
+    try { listed = parseModlist(fflate.strFromU8((await extract(src.u8, [mlPath]))[mlPath])); } catch (e) { return false; }
+    if (!listed.length || S.a.src !== src || S.a.busy) return false;
+    listed.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    S.a.listShown = true;
+    lists.a.set(listed.map((x) => ({ path: x.name + (x.author ? '  ·  by ' + x.author : ''), size: '', state: '', label: 'ready' })));
+    return true;
   }
   // Fills in real mod names and file names before the build, as soon as CurseForge can be reached.
   async function previewNamesA() {
     const st = S.a, src = st.src;
     if (!src || src.kind !== 'cf' || st.busy || st.resolved === src) return;
     if (!(Net.helper && (S.key.trim() || Net.relayKey))) {
-      showMsg('#a-note', LEAN ? 'Mod names show here once CurseForge can be reached. Until then the list shows CurseForge IDs.' : 'Mod names need a helper or relay and a CurseForge key (see Relay settings). Until then the list shows CurseForge IDs.', 'info');
+      const listed = await showListedA(src);
+      const why = LEAN ? 'CurseForge cannot be reached right now.' : 'CurseForge needs a helper or relay and a key (see Relay settings).';
+      if (S.a.src === src) showMsg('#a-note', listed ? 'Names come from modlist.html in the zip. ' + why + ' Exact file names and sizes appear once it can be reached, and every mod is still downloaded by ID.' : 'No modlist.html in this zip, so the list shows CurseForge IDs. ' + why, 'info');
       return;
     }
     st.resolved = src;
@@ -928,7 +943,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     } catch (e) {
       if (S.a.src !== src) return;
       st.resolved = null;
-      showMsg('#a-note', 'Could not look up mod names yet. ' + describeError(e) + ' They are filled in during the build.', 'warn');
+      const listed = await showListedA(src);
+      if (S.a.src === src) showMsg('#a-note', 'Could not look up exact files yet. ' + describeError(e) + (listed ? ' Names shown are from modlist.html.' : ' The list shows CurseForge IDs until the build.'), 'warn');
     }
   }
 
@@ -1015,7 +1031,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       sink = await openSink(outName, 'zip');           // must run first: the save dialog needs the click
       st.outName = outName;
       const rows = st.rows, list = lists.a;
-      rows.forEach((r) => { r.state = ''; r.label = 'waiting'; }); list.sched();
+      rows.forEach((r) => { r.state = ''; r.label = 'waiting'; });
+      if (st.listShown) { st.listShown = false; list.set(rows); } else list.sched();
       const failed = [];
       let skipped = 0, written;
 
