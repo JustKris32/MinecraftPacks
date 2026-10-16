@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Packshift</title>
+<title>Packshift: convert Minecraft modpacks</title>
+<meta name="description" content="Packshift converts Minecraft modpacks between CurseForge, Modrinth (.mrpack) and plain zips, right in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Crect x='2' y='2' width='11' height='11' fill='%23b9541f'/%3E%3Crect x='15' y='2' width='11' height='11' fill='%231a201c'/%3E%3Crect x='2' y='15' width='11' height='11' fill='%231a201c'/%3E%3Crect x='16' y='16' width='9' height='9' fill='none' stroke='%231a201c' stroke-width='2'/%3E%3C/svg%3E">
 <style>
 /* Layout: one narrow workbench column. Direction switch, drop zone, pack summary, options, live file list.
    Fonts are system fonts on purpose, so the page has no network dependencies and works fully offline. */
@@ -50,8 +52,15 @@ body {
 code, .mono { font-family: var(--mono); font-size: 0.88em; }
 .wrap { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
 
-.brand { display: flex; align-items: center; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 16px; }
 .brand h1 { margin: 0; font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+.logo { flex: none; display: block; }
+.brand-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tagline { margin: 0; font-family: var(--mono); font-size: 0.82rem; color: var(--accent); letter-spacing: 0.02em; }
+.about { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 18px 0 0; padding: 0; list-style: none; }
+.about li { border: 1px solid var(--line); background: var(--panel); padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.about b { font-family: var(--mono); font-size: 0.82rem; }
+.about span { color: var(--muted); font-size: 0.85rem; line-height: 1.4; }
 .lede { margin: 14px 0 0; color: var(--muted); max-width: 66ch; }
 .lede code { color: var(--fg); }
 
@@ -165,15 +174,24 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 <div class="wrap">
   <header>
     <div class="brand">
-      <svg width="30" height="30" viewBox="0 0 28 28" aria-hidden="true">
+      <svg class="logo" width="64" height="64" viewBox="0 0 28 28" role="img" aria-label="Packshift logo">
         <rect x="2" y="2" width="11" height="11" fill="var(--accent)"/>
         <rect x="15" y="2" width="11" height="11" fill="var(--fg)"/>
         <rect x="2" y="15" width="11" height="11" fill="var(--fg)"/>
         <rect x="16" y="16" width="9" height="9" fill="none" stroke="var(--fg)" stroke-width="2"/>
       </svg>
-      <h1>Packshift</h1>
+      <div class="brand-text">
+        <h1>Packshift</h1>
+        <p class="tagline">Move Minecraft modpacks between launchers.</p>
+      </div>
     </div>
-    <p class="lede">Turn a Modrinth <code>.mrpack</code> or a CurseForge pack into a plain <code>.zip</code> with every mod and config file inside, or package an instance <code>.zip</code> or CurseForge pack as an <code>.mrpack</code>. Files are read and built in this page. Only mod downloads and lookups go online.</p>
+    <p class="lede">Packshift converts modpacks between CurseForge, Modrinth and plain zip files. A CurseForge export only holds a manifest, a mod list and your overrides, so Packshift downloads every mod and builds a complete pack for you. Everything is read and built in this page. Only mod downloads and lookups go online.</p>
+    <ul class="about">
+      <li><b>.mrpack → .zip</b><span>Unpack a Modrinth pack with every mod and config inside.</span></li>
+      <li><b>CurseForge → .zip</b><span>Turn a manifest-only export into a full, ready-to-run zip.</span></li>
+      <li><b>.zip → .mrpack</b><span>Package an instance or CurseForge pack for Modrinth.</span></li>
+      <li><b>Inspect a pack</b><span>Look inside any pack and spot mods for the wrong version or loader.</span></li>
+    </ul>
   </header>
 
   <div id="boot-error" class="msg err" role="alert" hidden></div>
