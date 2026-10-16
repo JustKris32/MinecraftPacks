@@ -180,6 +180,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
   <div class="modes" role="tablist" aria-label="Conversion direction">
     <button type="button" role="tab" id="tab-a" aria-selected="true" aria-controls="panel-a">.mrpack → .zip</button>
+    <button type="button" role="tab" id="tab-d" aria-selected="false" aria-controls="panel-a">CurseForge → .zip</button>
     <button type="button" role="tab" id="tab-b" aria-selected="false" aria-controls="panel-b">.zip → .mrpack</button>
     <button type="button" role="tab" id="tab-c" aria-selected="false" aria-controls="panel-c">Inspect a pack</button>
   </div>
@@ -196,7 +197,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   <main>
     <!-- to .zip -->
     <section class="panel" id="panel-a" role="tabpanel" aria-labelledby="tab-a">
-      <div class="srcpick" role="radiogroup" aria-label="Type of pack">
+      <div class="srcpick" role="radiogroup" aria-label="Type of pack" hidden>
         <label class="check"><input type="radio" name="a-srctype" id="a-src-mr" value="mr" checked> Modrinth pack (.mrpack)</label>
         <label class="check"><input type="radio" name="a-srctype" id="a-src-cf" value="cf"> CurseForge pack (.zip)</label>
       </div>
@@ -219,6 +220,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
           </dl>
         </div>
 
+        <div id="a-note" class="msg info" hidden></div>
         <div class="cf" id="a-cf" hidden></div>
 
         <div class="opts">
@@ -569,6 +571,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     // These hosts never allow direct downloads from a web page, so skip the attempt that is certain to fail.
     if (Net.helper) ['edge.forgecdn.net', 'mediafilez.forgecdn.net', 'media.forgecdn.net', 'github.com'].forEach((h) => { Net.viaProxy[h] = true; });
     paintHelpers();
+    previewNamesA();
   }
   function helperText() {
     if (!Net.helper) return 'No helper or relay found. CurseForge packs need one. Open Relay settings above.';
@@ -666,6 +669,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       ['a', 'b', 'c'].forEach((o) => { if (o !== k) { $('#' + o + '-key').value = input.value; $('#' + o + '-keep').checked = keep.checked; } });
     };
     input.addEventListener('input', sync); keep.addEventListener('change', sync);
+    input.addEventListener('change', () => previewNamesA());
   });
 
   $('#relay-url').value = S.relay;
@@ -786,9 +790,25 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   paintHelpers();
   detectHelper();
 
-  const modes = ['a', 'b', 'c'];
+  const modes = ['a', 'd', 'b', 'c'];      // tabs a and d share one panel: a = Modrinth source, d = CurseForge source
+  let curMode = 'a';
+  function paintMode(m) {
+    curMode = m;
+    modes.forEach((k) => $('#tab-' + k).setAttribute('aria-selected', k === m ? 'true' : 'false'));
+    const panel = m === 'd' ? 'a' : m;
+    ['a', 'b', 'c'].forEach((k) => { $('#panel-' + k).hidden = k !== panel; });
+  }
   function setMode(m) {
-    modes.forEach((k) => { $('#tab-' + k).setAttribute('aria-selected', k === m ? 'true' : 'false'); $('#panel-' + k).hidden = k !== m; });
+    if (m === 'a' || m === 'd') {
+      const want = m === 'd' ? 'cf' : 'mr';
+      const st = S.a;
+      if (st.src && (st.src.kind === 'cf' ? 'cf' : 'mr') !== want) {
+        if (st.busy) return;                       // do not swap a pack out from under a running build
+        resetA();
+      }
+      setSrcA(want);
+    }
+    paintMode(m);
   }
   modes.forEach((k) => $('#tab-' + k).addEventListener('click', () => setMode(k)));
 
@@ -812,17 +832,23 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   function setSrcA(v) {
     $('#a-src-' + v).checked = true;
     $('#a-file').accept = v === 'cf' ? '.zip' : '.mrpack,.zip';
-    $('#a-drop-title').textContent = v === 'cf' ? 'Drop your CurseForge pack here' : 'Drop a .mrpack here';
+    if (curMode === 'a' || curMode === 'd') paintMode(v === 'cf' ? 'd' : 'a');
+    $('#a-drop-title').textContent = v === 'cf' ? 'Drop your CurseForge export here' : 'Drop a .mrpack here';
     $('#a-drop-sub').textContent = v === 'cf'
-      ? 'the zip CurseForge exports, with manifest.json, overrides and modlist.html. Every mod is downloaded and added.'
+      ? 'the .zip from CurseForge (manifest.json, overrides, modlist.html). Every mod is downloaded and added, so you get a full zip.'
       : 'or click to choose a file. The mods are downloaded and added to the zip.';
   }
   document.querySelectorAll('input[name="a-srctype"]').forEach((r) => r.addEventListener('change', () => setSrcA(r.value)));
 
+  function resetA() {
+    const st = S.a;
+    ['#a-error', '#a-result', '#a-progress', '#a-pack', '#a-save', '#a-note'].forEach(hide);
+    st.blob = null; st.src = null; st.preview = null; st.resolved = null; st.rows = [];
+  }
   wireDrop($('#a-drop'), $('#a-file'), async (file) => {
     const st = S.a;
     if (st.busy) return;
-    hide('#a-error'); hide('#a-result'); hide('#a-progress'); hide('#a-pack'); hide('#a-save'); st.blob = null;
+    resetA();
     let src;
     try { src = await readSource(file); } catch (e) { return showMsg('#a-error', describeError(e), 'err'); }
     if (src.kind === 'instance') return showMsg('#a-error', 'This zip has no modrinth.index.json or CurseForge manifest.json, so it is already a plain instance zip. Use the .zip → .mrpack tab to make an .mrpack from it.', 'err');
@@ -852,6 +878,42 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   }
   const cfOverrideRoot = (src) => src.root + (src.manifest.overrides || 'overrides');
 
+  const cfRowPath = (it) => it.missing ? it.name + '  (file ' + it.fileID + ' unavailable)' : it.name + '  ·  ' + it.fileName;
+  function applyPreviewA(res) {
+    const st = S.a; let total = 0;
+    st.rows.forEach((r, i) => {
+      const it = res[i]; if (!it) return;
+      Object.assign(r, { path: cfRowPath(it), size: fmtBytes(it.size || 0), it });
+      if (it.missing) { r.state = 'bad'; r.label = 'removed'; }
+      total += it.size || 0;
+    });
+    $('#a-size').textContent = fmtBytes(total);
+    lists.a.sched();
+  }
+  // Fills in real mod names and file names before the build, as soon as CurseForge can be reached.
+  async function previewNamesA() {
+    const st = S.a, src = st.src;
+    if (!src || src.kind !== 'cf' || st.busy || st.resolved === src) return;
+    if (!(Net.helper && (S.key.trim() || Net.relayKey))) {
+      showMsg('#a-note', LEAN ? 'Mod names show here once CurseForge can be reached. Until then the list shows CurseForge IDs.' : 'Mod names need a helper or relay and a CurseForge key (see Relay settings). Until then the list shows CurseForge IDs.', 'info');
+      return;
+    }
+    st.resolved = src;
+    showMsg('#a-note', 'Looking up mod names on CurseForge…', 'info');
+    try {
+      const res = await cfResolve(src.manifest, newCtl());
+      if (S.a.src !== src) return;
+      st.preview = res;
+      if (!st.busy) applyPreviewA(res);
+      const gone = res.filter((r) => r.missing).length;
+      showMsg('#a-note', 'Names and file names came from CurseForge.' + (gone ? ' ' + gone + ' file(s) were removed from CurseForge and cannot be downloaded.' : ''), gone ? 'warn' : 'info');
+    } catch (e) {
+      if (S.a.src !== src) return;
+      st.resolved = null;
+      showMsg('#a-note', 'Could not look up mod names yet. ' + describeError(e) + ' They are filled in during the build.', 'warn');
+    }
+  }
+
   function renderA() {
     const st = S.a, src = st.src, isCf = src.kind === 'cf';
     const meta = isCf ? src.manifest : src.index;
@@ -878,6 +940,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     $('#a-go').textContent = 'Download mods and build zip';
     buildRowsA();
     $('#a-pack').hidden = false;
+    previewNamesA();
   }
   function buildRowsA() {
     const st = S.a, src = st.src;
@@ -945,10 +1008,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
       if (isCf) {
         setProgress('a', 0.08, 'Asking CurseForge about ' + rows.length + ' files…');
-        const resolved = await cfResolve(src.manifest, ctl);
+        const resolved = st.preview || await cfResolve(src.manifest, ctl);
         let total = 0;
         resolved.forEach((it, i) => {
-          Object.assign(rows[i], { path: it.missing ? it.name + ' (file ' + it.fileID + ')' : it.path, size: fmtBytes(it.size || 0), it });
+          Object.assign(rows[i], { path: cfRowPath(it), size: fmtBytes(it.size || 0), it });
           total += it.size || 0;
         });
         $('#a-size').textContent = fmtBytes(total);
