@@ -150,6 +150,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 .relay summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .relay-body { padding: 4px 14px 16px; display: flex; flex-direction: column; gap: 12px; }
 .relay-body p { margin: 0; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.toolbar .field { flex: 1 1 220px; }
+.toolbar .field.small { flex: 0 1 190px; }
+.count { font-family: var(--mono); font-size: 0.84rem; color: var(--muted); }
 .foot { color: var(--muted); font-size: 0.84rem; max-width: 72ch; }
 @media (max-width: 520px) { .vrow { grid-template-columns: minmax(0, 1fr) auto; } .vrow .size { display: none; } }
 </style>
@@ -174,6 +178,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   <div class="modes" role="tablist" aria-label="Conversion direction">
     <button type="button" role="tab" id="tab-a" aria-selected="true" aria-controls="panel-a">.mrpack → .zip</button>
     <button type="button" role="tab" id="tab-b" aria-selected="false" aria-controls="panel-b">.zip → .mrpack</button>
+    <button type="button" role="tab" id="tab-c" aria-selected="false" aria-controls="panel-c">Inspect a pack</button>
   </div>
 
   <details class="relay" id="relay">
@@ -291,6 +296,50 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
         </div>
         <div id="b-result" class="msg ok" hidden></div>
         <div class="vlist" id="b-files" role="list" aria-label="Matched files" hidden></div>
+      </div>
+    </section>
+    <!-- inspect -->
+    <section class="panel" id="panel-c" role="tabpanel" aria-labelledby="tab-c" hidden>
+      <label class="drop" id="c-drop" for="c-file">
+        <input type="file" id="c-file" accept=".zip,.mrpack">
+        <strong>Drop a pack here to look inside</strong>
+        <span>a CurseForge export (manifest, modlist, overrides), an .mrpack or an instance zip. Nothing is downloaded or changed.</span>
+      </label>
+      <div id="c-error" class="msg err" role="alert" hidden></div>
+
+      <div id="c-pack" class="panel" hidden>
+        <div class="card">
+          <div class="pack-head"><h2 id="c-name"></h2><span id="c-ver" class="tag"></span><span id="c-src" class="tag src"></span></div>
+          <p id="c-sub" class="muted"></p>
+          <div id="c-deps" class="chips"></div>
+          <dl class="stats">
+            <div><dt>Mods and packs</dt><dd id="c-n1">0</dd></div>
+            <div><dt>Bundled files</dt><dd id="c-n2">0</dd></div>
+            <div><dt>Need a look</dt><dd id="c-n3">0</dd></div>
+          </dl>
+        </div>
+        <div id="c-note" class="msg info" hidden></div>
+
+        <div class="cf" id="c-cf" hidden></div>
+        <div class="actions"><button type="button" class="btn" id="c-lookup" hidden>Look up exact files and versions</button></div>
+
+        <div class="toolbar">
+          <div class="field"><label for="c-q">Search</label><input type="text" id="c-q" placeholder="name, file or version" autocomplete="off"></div>
+          <div class="field small"><label for="c-type">Show</label>
+            <select id="c-type">
+              <option value="all">Everything</option>
+              <option value="flag">Only ones that need a look</option>
+              <option value="mod">Mods</option>
+              <option value="resource pack">Resource packs</option>
+              <option value="shader">Shaders</option>
+              <option value="datapack">Data packs</option>
+            </select>
+          </div>
+          <button type="button" class="btn ghost" id="c-copy">Copy list</button>
+          <button type="button" class="btn ghost" id="c-csv">Save .csv</button>
+        </div>
+        <div class="count" id="c-count" aria-live="polite"></div>
+        <div class="vlist" id="c-files" role="list" aria-label="Contents of the pack" hidden></div>
       </div>
     </section>
   </main>
@@ -489,15 +538,18 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   }
 
   // ------------------------------------------------------------------ network
-  const Net = { helper: false, base: '', viaProxy: {} };
+  const Net = { helper: false, base: '', relayKey: false, viaProxy: {} };
   async function pingBase(base) {
     try {
       const r = await fetch(base + '/__packshift/ping', { cache: 'no-store' });
-      return r.ok && !!(await r.json()).packshift;
+      if (!r.ok) return false;
+      const j = await r.json();
+      if (j && j.packshift) { Net.relayKey = !!j.cfKey; return true; }
+      return false;
     } catch (e) { return false; }
   }
   async function detectHelper() {
-    Net.helper = false; Net.base = ''; Net.viaProxy = {};
+    Net.helper = false; Net.base = ''; Net.relayKey = false; Net.viaProxy = {};
     if (/^https?:$/.test(location.protocol) && await pingBase('')) Net.helper = true;
     else {
       const relay = String(S.relay || DEFAULT_RELAY).trim().replace(/\/+$/, '');
@@ -507,11 +559,13 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   }
   function helperText() {
     if (!Net.helper) return 'No helper or relay found. CurseForge packs need one. Open Relay settings above.';
-    return Net.base ? 'Relay connected (' + new URL(Net.base).host + '). CurseForge requests and blocked downloads go through it.' : 'Local helper connected. CurseForge requests and blocked downloads go through it.';
+    const who = Net.base ? 'Relay connected (' + new URL(Net.base).host + ').' : 'Local helper connected.';
+    return who + ' CurseForge requests and blocked downloads go through it.' + (Net.relayKey ? ' A shared CurseForge key is built in, so you do not need your own.' : '');
   }
   function paintHelpers() {
     document.querySelectorAll('.helper').forEach((n) => { n.className = 'helper ' + (Net.helper ? 'on' : 'off'); n.textContent = helperText(); });
     $('#relay-badge').textContent = Net.helper ? (Net.base ? 'relay on' : 'helper on') : 'off';
+    document.querySelectorAll('label[for$="-key"]').forEach((l) => { l.textContent = Net.helper && Net.relayKey ? 'CurseForge API key (optional, the relay already has one)' : 'CurseForge API key'; });
   }
   const proxied = (url) => Net.base + '/__packshift/dl?url=' + encodeURIComponent(url);
   const httpErr = (status) => Object.assign(new Error('HTTP ' + status), { status });
@@ -588,7 +642,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       '<label class="check"><input type="checkbox" id="' + k + '-keep"> Remember the key in this browser</label>' +
       '<div class="helper" id="' + k + '-helper"></div>';
   }
-  ['a', 'b'].forEach((k) => {
+  ['a', 'b', 'c'].forEach((k) => {
     const box = $('#' + k + '-cf');
     box.innerHTML = cfBoxHtml(k);
     const input = $('#' + k + '-key'), keep = $('#' + k + '-keep');
@@ -596,7 +650,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const sync = () => {
       S.key = input.value.trim();
       try { if (keep.checked && S.key) localStorage.setItem('packshift.cfkey', S.key); else localStorage.removeItem('packshift.cfkey'); } catch (e) { /* storage unavailable */ }
-      ['a', 'b'].forEach((o) => { if (o !== k) { $('#' + o + '-key').value = input.value; $('#' + o + '-keep').checked = keep.checked; } });
+      ['a', 'b', 'c'].forEach((o) => { if (o !== k) { $('#' + o + '-key').value = input.value; $('#' + o + '-keep').checked = keep.checked; } });
     };
     input.addEventListener('input', sync); keep.addEventListener('change', sync);
   });
@@ -610,10 +664,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
   async function cfApi(path, body) {
     const key = S.key.trim();
-    if (!key) throw new Error('Enter your CurseForge API key first.');
-    if (!/^[\x21-\x7e]+$/.test(key)) throw new Error('The CurseForge API key has characters that are not allowed. Paste it again.');
+    if (!key && !(Net.helper && Net.relayKey)) throw new Error('Enter your CurseForge API key first.');
+    if (key && !/^[\x21-\x7e]+$/.test(key)) throw new Error('The CurseForge API key has characters that are not allowed. Paste it again.');
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
-    headers[Net.helper ? 'x-cf-key' : 'x-api-key'] = key;
+    if (key) headers[Net.helper ? 'x-cf-key' : 'x-api-key'] = key;
     let res;
     try { res = await fetch((Net.helper ? Net.base + '/__packshift/cf' : 'https://api.curseforge.com') + path, { method: 'POST', headers, body: JSON.stringify(body) }); }
     catch (e) { throw new Error(Net.helper ? 'Could not reach CurseForge.' : 'The browser blocked the request to CurseForge. Run the helper or add a relay in Relay settings.'); }
@@ -622,6 +676,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     return (await res.json()).data || [];
   }
   const CF_FOLDER = { 6: 'mods', 12: 'resourcepacks', 6552: 'shaderpacks', 6945: 'datapacks' };
+  const CF_KIND = { 6: 'mod', 12: 'resource pack', 6552: 'shader', 6945: 'datapack' };
 
   async function cfResolve(manifest, ctl) {
     const fileIds = manifest.files.map((f) => f.fileID);
@@ -648,6 +703,12 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       const enc = encodeURIComponent(d.fileName);
       out.urls = [d.downloadUrl, 'https://edge.forgecdn.net/files/' + dir + '/' + rest + '/' + enc, 'https://mediafilez.forgecdn.net/files/' + dir + '/' + rest + '/' + enc].filter(Boolean);
       out.path = out.folder + '/' + out.fileName;
+      out.display = d.displayName || d.fileName;
+      out.date = String(d.fileDate || '').slice(0, 10);
+      out.release = { 1: 'release', 2: 'beta', 3: 'alpha' }[d.releaseType] || '';
+      out.gv = d.gameVersions || [];
+      out.kind = CF_KIND[p.classId] || 'mod';
+      out.author = (p.authors && p.authors[0] && p.authors[0].name) || '';
       return out;
     });
   }
@@ -712,13 +773,13 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   paintHelpers();
   detectHelper();
 
-  const modes = ['a', 'b'];
+  const modes = ['a', 'b', 'c'];
   function setMode(m) {
     modes.forEach((k) => { $('#tab-' + k).setAttribute('aria-selected', k === m ? 'true' : 'false'); $('#panel-' + k).hidden = k !== m; });
   }
   modes.forEach((k) => $('#tab-' + k).addEventListener('click', () => setMode(k)));
 
-  const lists = { a: new VList($('#a-files')), b: new VList($('#b-files')) };
+  const lists = { a: new VList($('#a-files')), b: new VList($('#b-files')), c: new VList($('#c-files')) };
   function setBusy(k, busy) {
     S[k].busy = busy;
     $('#' + k + '-go').disabled = busy;
@@ -1068,7 +1129,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     if (!name) return showMsg('#b-result', 'Enter a pack name.', 'err');
     if (!mc) return showMsg('#b-result', 'Enter the Minecraft version, for example 1.20.1.', 'err');
     if (loader !== 'none' && !loaderVer) return showMsg('#b-result', 'Enter the loader version, for example 0.15.7.', 'err');
-    if (src.kind === 'cf' && !S.key.trim()) return showMsg('#b-result', 'Enter your CurseForge API key first.', 'err');
+    if (src.kind === 'cf' && !S.key.trim() && !(Net.helper && Net.relayKey)) return showMsg('#b-result', 'Enter your CurseForge API key first.', 'err');
 
     st.ctl = newCtl(); const ctl = st.ctl;
     hide('#b-result'); hide('#b-save'); st.blob = null;
@@ -1180,6 +1241,246 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       else showMsg('#b-result', 'The build stopped. ' + describeError(e), 'err');
     } finally { setBusy('b', false); }
   }
+
+  // ================================================================== TAB C: inspect a pack
+  const C = { src: null, items: [], shown: [], pack: { mc: '', loader: '' }, token: 0 };
+  const LOADER_SHORT = { 'fabric-loader': 'fabric', 'quilt-loader': 'quilt', forge: 'forge', neoforge: 'neoforge' };
+  const LOADER_LABEL = { fabric: 'Fabric', quilt: 'Quilt', forge: 'Forge', neoforge: 'NeoForge' };
+  const mcMinor = (v) => { const m = /^(\d+)\.(\d+)/.exec(String(v || '')); return m ? m[1] + '.' + m[2] : ''; };
+
+  // Returns a short reason when a file targets a different Minecraft line or loader than the pack.
+  function flagFor(versions, loaders, pack) {
+    const want = mcMinor(pack.mc);
+    if (want && versions.length) {
+      const vs = versions.map(mcMinor).filter(Boolean);
+      if (vs.length && !vs.includes(want)) return 'other MC';
+    }
+    if (pack.loader && loaders.length) {
+      const ok = pack.loader === 'quilt' ? ['quilt', 'fabric'] : pack.loader === 'neoforge' ? ['neoforge', 'forge'] : [pack.loader];
+      if (!loaders.some((l) => ok.includes(l))) return 'other loader';
+    }
+    return '';
+  }
+  function parseModlist(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');   // inert: scripts and images in it never run or load
+    const out = [];
+    doc.querySelectorAll('li a').forEach((a) => {
+      let text = (a.textContent || '').trim(), author = '';
+      const m = /^(.*?)\s*\(by ([^)]*)\)\s*$/.exec(text);
+      if (m) { text = m[1]; author = m[2]; }
+      if (text) out.push({ name: text, author, url: a.getAttribute('href') || '' });
+    });
+    return out;
+  }
+  const JAR_META = ['fabric.mod.json', 'quilt.mod.json', 'META-INF/mods.toml', 'META-INF/neoforge.mods.toml', 'mcmod.info'];
+  function tomlMod(t) {
+    const block = t.split(/\[\[mods\]\]/)[1] || '';
+    const pick = (k) => { const m = new RegExp('^\\s*' + k + '\\s*=\\s*["\']([^"\']*)["\']', 'm').exec(block); return m ? m[1] : ''; };
+    let version = pick('version');
+    if (/^\$\{/.test(version)) version = '';
+    return { id: pick('modId'), name: pick('displayName') || pick('modId'), version };
+  }
+  function jarInfo(bytes) {
+    let f = {};
+    try { f = fflate.unzipSync(bytes, { filter: (x) => JAR_META.indexOf(x.name) !== -1 }); } catch (e) { return null; }
+    const txt = (n) => (f[n] ? fflate.strFromU8(f[n]) : null);
+    try {
+      let t;
+      if ((t = txt('fabric.mod.json'))) { const j = JSON.parse(t); return { loader: 'fabric', id: j.id, name: j.name || j.id, version: j.version }; }
+      if ((t = txt('quilt.mod.json'))) { const q = JSON.parse(t).quilt_loader || {}; return { loader: 'quilt', id: q.id, name: (q.metadata && q.metadata.name) || q.id, version: q.version }; }
+      if ((t = txt('META-INF/neoforge.mods.toml'))) return Object.assign({ loader: 'neoforge' }, tomlMod(t));
+      if ((t = txt('META-INF/mods.toml'))) return Object.assign({ loader: 'forge' }, tomlMod(t));
+      if ((t = txt('mcmod.info'))) { let j = JSON.parse(t); j = Array.isArray(j) ? j[0] : (j.modList ? j.modList[0] : j); return { loader: 'forge', id: j.modid, name: j.name || j.modid, version: j.version }; }
+    } catch (e) { return null; }
+    return null;
+  }
+
+  function sortItems() { C.items.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })); }
+  function rowOf(it) { return { path: it.name + (it.file ? '  ·  ' + it.file : ''), size: it.version || '', state: it.flag ? 'warn' : '', label: it.flag || it.kind || 'mod' }; }
+  function refreshC() {
+    const q = $('#c-q').value.trim().toLowerCase(), t = $('#c-type').value;
+    C.shown = C.items.filter((it) => (t === 'all' || (t === 'flag' ? !!it.flag : it.kind === t)) && (!q || (it.name + ' ' + it.file + ' ' + it.version).toLowerCase().indexOf(q) !== -1));
+    lists.c.set(C.shown.map(rowOf));
+    $('#c-n1').textContent = String(C.items.length);
+    $('#c-n3').textContent = String(C.items.filter((it) => it.flag).length);
+    $('#c-count').textContent = C.shown.length === C.items.length ? C.items.length + ' entries' : C.shown.length + ' of ' + C.items.length + ' entries';
+  }
+  ['input', 'change'].forEach((ev) => { $('#c-q').addEventListener(ev, refreshC); $('#c-type').addEventListener(ev, refreshC); });
+  function setHead(o) {
+    $('#c-name').textContent = o.name || '';
+    $('#c-ver').textContent = o.ver ? 'v' + o.ver : ''; $('#c-ver').hidden = !o.ver;
+    $('#c-src').textContent = o.src;
+    $('#c-sub').textContent = o.sub || ''; $('#c-sub').hidden = !o.sub;
+    const d = $('#c-deps'); d.textContent = '';
+    (o.chips || []).forEach((t) => d.appendChild(el('span', 'chip', t)));
+    $('#c-n2').textContent = String(o.bundled || 0);
+    $('#c-pack').hidden = false;
+  }
+  const flagSummary = () => {
+    const n = C.items.filter((it) => it.flag).length;
+    return n ? n + ' of ' + C.items.length + ' entries target a different Minecraft version or loader than this pack, or are unavailable. Use "Only ones that need a look" to see them. Mods for the same release line (1.20 on a 1.20.1 pack) are not flagged.' : 'Every entry matches this pack\'s Minecraft version and loader.';
+  };
+
+  wireDrop($('#c-drop'), $('#c-file'), async (file) => {
+    hide('#c-error'); hide('#c-pack'); hide('#c-note'); hide('#c-lookup'); $('#c-cf').hidden = true;
+    let src;
+    try { src = await readSource(file); } catch (e) { return showMsg('#c-error', describeError(e), 'err'); }
+    C.src = src; C.items = []; C.shown = []; const tok = ++C.token;
+    $('#c-q').value = ''; $('#c-type').value = 'all';
+    try {
+      if (src.kind === 'cf') await inspectCf(src, tok);
+      else if (src.kind === 'mrpack') await inspectMr(src, tok);
+      else await inspectInstance(src, tok);
+    } catch (e) {
+      if (tok !== C.token) return;
+      if ($('#c-pack').hidden) showMsg('#c-error', describeError(e), 'err'); else showMsg('#c-note', 'Part of the lookup failed. ' + describeError(e), 'warn');
+    }
+  });
+
+  async function inspectCf(src, tok) {
+    const m = src.manifest, l = cfLoader(m);
+    C.pack = { mc: m.minecraft.version || '', loader: l ? LOADER_SHORT[l.key] : '' };
+    const chips = ['Minecraft ' + (m.minecraft.version || '?')];
+    (m.minecraft.modLoaders || []).forEach((x) => chips.push(x.id));
+    if (!(m.minecraft.modLoaders || []).length) chips.push('no mod loader');
+    setHead({ name: m.name || src.file.name, ver: m.version, src: 'CurseForge pack', sub: m.author ? 'by ' + m.author : '', chips, bundled: planOverrides(src.names, 'all', [cfOverrideRoot(src)]).map.size });
+    const mlPath = src.names.find((n) => /(^|\/)modlist\.html$/i.test(n));
+    let listed = [];
+    if (mlPath) { try { listed = parseModlist(fflate.strFromU8((await extract(src.u8, [mlPath]))[mlPath])); } catch (e) { listed = []; } }
+    C.items = listed.length
+      ? listed.map((x) => ({ name: x.name, file: '', version: '', kind: 'mod', site: x.url, note: x.author ? 'by ' + x.author : '', flag: '' }))
+      : m.files.map((f) => ({ name: 'CurseForge project ' + f.projectID, file: 'file ' + f.fileID, version: '', kind: 'mod', site: 'https://www.curseforge.com/projects/' + f.projectID, note: '', flag: '' }));
+    sortItems(); refreshC();
+    $('#c-cf').hidden = false;
+    if (Net.helper && (S.key.trim() || Net.relayKey)) { await lookupCf(tok); return; }
+    $('#c-lookup').hidden = false;
+    showMsg('#c-note', (listed.length ? 'Names come from modlist.html (' + listed.length + ' entries; the manifest lists ' + m.files.length + ' files).' : 'This zip has no modlist.html, so only CurseForge IDs are shown.') +
+      ' Exact file names, versions and compatibility need a helper or relay and a CurseForge key. Set them in Relay settings, then press Look up.', 'info');
+    if (!Net.helper) $('#relay').open = true;
+  }
+  async function lookupCf(tok) {
+    const m = C.src.manifest;
+    if (!(Net.helper && (S.key.trim() || Net.relayKey))) return showMsg('#c-note', 'Connect a helper or relay and enter a CurseForge key first.', 'warn');
+    $('#c-lookup').disabled = true;
+    $('#c-count').textContent = 'Asking CurseForge about ' + m.files.length + ' files…';
+    try {
+      const res = await cfResolve(m, newCtl());
+      if (tok !== C.token) return;
+      C.items = res.map((it) => {
+        if (it.missing) return { name: it.name, file: 'file ' + it.fileID, version: '', kind: 'mod', site: it.site, note: 'file removed or unavailable', flag: 'unavailable' };
+        const loaders = it.gv.map((v) => v.toLowerCase()).filter((v) => LOADER_LABEL[v]);
+        return {
+          name: it.name, file: it.fileName, version: it.display !== it.fileName ? it.display : '', kind: it.kind, site: it.site,
+          note: [it.release, it.date, it.author && 'by ' + it.author].filter(Boolean).join(', '),
+          flag: flagFor(it.gv.filter((v) => /^\d+\.\d+/.test(v)), loaders, C.pack)
+        };
+      });
+      sortItems(); refreshC(); hide('#c-lookup');
+      showMsg('#c-note', 'Exact files and versions came from CurseForge. ' + flagSummary(), 'info');
+    } catch (e) {
+      if (tok === C.token) showMsg('#c-note', describeError(e), 'warn');
+      refreshC();
+    } finally { $('#c-lookup').disabled = false; }
+  }
+  $('#c-lookup').addEventListener('click', () => lookupCf(C.token));
+
+  async function inspectMr(src, tok) {
+    const ix = src.index, d = ix.dependencies || {};
+    const lk = ['fabric-loader', 'quilt-loader', 'forge', 'neoforge'].find((k) => d[k]);
+    C.pack = { mc: d.minecraft || '', loader: lk ? LOADER_SHORT[lk] : '' };
+    const chips = [];
+    if (d.minecraft) chips.push('Minecraft ' + d.minecraft);
+    Object.keys(d).forEach((k) => { if (k !== 'minecraft') chips.push((LOADER_SHORT[k] ? LOADER_LABEL[LOADER_SHORT[k]] : k) + ' ' + d[k]); });
+    setHead({ name: ix.name || src.file.name, ver: ix.versionId, src: 'Modrinth pack', sub: ix.summary || '', chips, bundled: planOverrides(src.names, 'all').map.size });
+    const kindOf = (p) => /^resourcepacks\//.test(p) ? 'resource pack' : /^shaderpacks\//.test(p) ? 'shader' : /^datapacks\//.test(p) ? 'datapack' : 'mod';
+    C.items = ix.files.map((f) => ({
+      name: String(f.path || '').split('/').pop().replace(/\.(jar|zip)$/i, ''), file: f.path || '', version: '', kind: kindOf(String(f.path || '')),
+      site: (f.downloads || [])[0] || '', note: f.env ? 'client ' + f.env.client + ', server ' + f.env.server : '', flag: '', hash: (f.hashes || {}).sha512
+    }));
+    sortItems(); refreshC();
+    $('#c-count').textContent = 'Looking up names on Modrinth…';
+    const hashes = C.items.map((it) => it.hash).filter(Boolean);
+    const found = {};
+    for (let i = 0; i < hashes.length; i += 200) { Object.assign(found, await mrVersions(hashes.slice(i, i + 200))); if (tok !== C.token) return; }
+    const projects = await mrProjects([...new Set(Object.keys(found).map((h) => found[h].project_id))]);
+    if (tok !== C.token) return;
+    C.items.forEach((it) => {
+      const v = found[it.hash];
+      if (!v) return;
+      const p = projects[v.project_id];
+      if (p) { it.name = p.title; it.site = 'https://modrinth.com/project/' + (p.slug || p.id); }
+      it.version = v.version_number || '';
+      it.flag = flagFor(v.game_versions || [], v.loaders || [], C.pack);
+    });
+    sortItems(); refreshC();
+    showMsg('#c-note', 'Names and versions came from Modrinth for ' + Object.keys(found).length + ' of ' + hashes.length + ' files. ' + flagSummary(), 'info');
+  }
+
+  async function inspectInstance(src, tok) {
+    const root = detectRoot(src.names);
+    const inRoot = src.names.filter((n) => n.indexOf(root) === 0 && !JUNK_RE.test(n));
+    const rel = (n) => n.slice(root.length);
+    const jars = inRoot.filter((n) => /^mods\/.+\.jar$/i.test(rel(n)));
+    const packs = inRoot.filter((n) => /^(resourcepacks|shaderpacks)\/.+\.(zip|jar)$/i.test(rel(n)));
+    const parent = root.replace(/[^/]*\/$/, '');
+    const mmc = (await readJsonFrom(src, parent + 'mmc-pack.json')) || (await readJsonFrom(src, 'mmc-pack.json'));
+    const uidMap = { 'net.fabricmc.fabric-loader': 'fabric-loader', 'org.quiltmc.quilt-loader': 'quilt-loader', 'net.minecraftforge': 'forge', 'net.neoforged': 'neoforge' };
+    let mc = '', loader = '', loaderVer = '';
+    if (mmc && Array.isArray(mmc.components)) mmc.components.forEach((c) => {
+      if (c.uid === 'net.minecraft') mc = c.version;
+      else if (uidMap[c.uid]) { loader = LOADER_SHORT[uidMap[c.uid]]; loaderVer = c.version; }
+    });
+    C.pack = { mc, loader };
+    const chips = [];
+    if (mc) chips.push('Minecraft ' + mc);
+    if (loader) chips.push(LOADER_LABEL[loader] + ' ' + loaderVer);
+    setHead({ name: src.file.name.replace(/\.[^.]+$/, ''), src: 'Instance zip', sub: root ? 'Game folders inside "' + root + '".' : '', chips, bundled: inRoot.length - jars.length - packs.length });
+    const base = (n) => rel(n).split('/').pop();
+    const jarItems = new Map();
+    C.items = packs.map((n) => ({ name: base(n).replace(/\.(jar|zip)$/i, ''), file: rel(n), version: '', kind: /^shaderpacks\//i.test(rel(n)) ? 'shader' : 'resource pack', site: '', note: '', flag: '' }));
+    jars.forEach((n) => { const it = { name: base(n).replace(/\.jar$/i, ''), file: rel(n), version: '', kind: 'mod', site: '', note: 'no mod metadata found', flag: '', loader: '' }; jarItems.set(n, it); C.items.push(it); });
+    sortItems(); refreshC();
+    const counts = {};
+    let done = 0;
+    for (const batch of batches(jars, (n) => src.sizes.get(n), 40, 32 * MB)) {
+      if (tok !== C.token) return;
+      const data = await extract(src.u8, batch);
+      for (const n of batch) {
+        const info = jarInfo(data[n]), it = jarItems.get(n);
+        if (info) {
+          it.name = info.name || it.name; it.version = info.version || ''; it.loader = info.loader; it.note = info.id ? 'id ' + info.id + ', ' + info.loader : info.loader;
+          counts[info.loader] = (counts[info.loader] || 0) + 1;
+        }
+        done++;
+      }
+      $('#c-count').textContent = 'Reading mod details… ' + done + ' of ' + jars.length;
+      await sleep(0);
+    }
+    if (!C.pack.loader) {
+      const top = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+      if (top) { C.pack.loader = top; $('#c-deps').appendChild(el('span', 'chip', LOADER_LABEL[top] + ' (from the mods)')); }
+    }
+    C.items.forEach((it) => { if (it.loader) it.flag = flagFor([], [it.loader], C.pack); });
+    sortItems(); refreshC();
+    const kinds = Object.keys(counts).map((k) => counts[k] + ' ' + LOADER_LABEL[k]).join(', ');
+    showMsg('#c-note', (kinds ? 'Mod metadata read from the jars: ' + kinds + '. ' : 'No mod metadata found in the jars. ') + (mc ? '' : 'The Minecraft version is not recorded in this zip. ') + flagSummary(), 'info');
+  }
+
+  function csvCell(v) {
+    v = String(v == null ? '' : v);
+    if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;      // stop spreadsheets from running a cell as a formula
+    return '"' + v.replace(/"/g, '""') + '"';
+  }
+  $('#c-csv').addEventListener('click', () => {
+    const head = ['name', 'file', 'version', 'type', 'note', 'link', 'flag'];
+    const lines = [head.join(',')].concat(C.shown.map((it) => [it.name, it.file, it.version, it.kind, it.note, it.site, it.flag].map(csvCell).join(',')));
+    saveBlob(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv' }), 'modlist.csv');
+  });
+  $('#c-copy').addEventListener('click', async () => {
+    const text = C.shown.map((it) => [it.name, it.file, it.version].filter(Boolean).join(' | ')).join('\n');
+    try { await navigator.clipboard.writeText(text); $('#c-count').textContent = 'Copied ' + C.shown.length + ' lines.'; }
+    catch (e) { saveBlob(new Blob([text], { type: 'text/plain' }), 'modlist.txt'); $('#c-count').textContent = 'The browser blocked the clipboard, so modlist.txt was saved instead.'; }
+  });
 
   // expose for tests
   window.__packshift = { safePath, planOverrides, batches, cfLoader };
