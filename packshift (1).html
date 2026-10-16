@@ -1,0 +1,1189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Packshift</title>
+<style>
+/* Layout: one narrow workbench column. Direction switch, drop zone, pack summary, options, live file list.
+   Fonts are system fonts on purpose, so the page has no network dependencies and works fully offline. */
+:root {
+  --bg: #edefea;
+  --panel: #f8f9f5;
+  --sunk: #e1e6dd;
+  --line: #c6cec2;
+  --fg: #1a201c;
+  --muted: #55615a;
+  --accent: #b9541f;
+  --accent-fg: #ffffff;
+  --ok: #1b7a67;
+  --warn: #9a6509;
+  --err: #b3302a;
+  --display: 'Segoe UI Variable Display', 'Segoe UI', 'Helvetica Neue', system-ui, -apple-system, sans-serif;
+  --mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131714; --panel: #1b201c; --sunk: #101311; --line: #2f3831;
+    --fg: #e5eae2; --muted: #9aa69d; --accent: #ec7c3c; --accent-fg: #1b1108;
+    --ok: #4fc0a9; --warn: #e0a63a; --err: #f0766e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131714; --panel: #1b201c; --sunk: #101311; --line: #2f3831;
+  --fg: #e5eae2; --muted: #9aa69d; --accent: #ec7c3c; --accent-fg: #1b1108;
+  --ok: #4fc0a9; --warn: #e0a63a; --err: #f0766e;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--display); font-size: 15px; line-height: 1.5;
+  padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 64px;
+}
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+.wrap { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand h1 { margin: 0; font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+.lede { margin: 14px 0 0; color: var(--muted); max-width: 66ch; }
+.lede code { color: var(--fg); }
+
+.modes { display: flex; border: 1px solid var(--line); background: var(--panel); width: fit-content; max-width: 100%; flex-wrap: wrap; }
+.modes button {
+  appearance: none; border: 0; background: transparent; color: var(--muted);
+  font-weight: 600; padding: 10px 18px; cursor: pointer; font-family: var(--mono); font-size: 0.9rem;
+}
+.modes button + button { border-left: 1px solid var(--line); }
+.modes button[aria-selected="true"] { background: var(--fg); color: var(--bg); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.panel { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+
+.drop {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  padding: 38px 20px; text-align: center; cursor: pointer;
+  border: 2px dashed var(--line); background: var(--panel);
+}
+.drop strong { font-size: 1.1rem; }
+.drop span { color: var(--muted); font-size: 0.9rem; }
+.drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.drop:hover, .drop.over { border-color: var(--accent); background: var(--sunk); }
+.drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.msg { padding: 12px 14px; border: 1px solid var(--line); border-left-width: 4px; background: var(--panel); min-width: 0; overflow-wrap: anywhere; }
+.msg.err { border-left-color: var(--err); }
+.msg.warn { border-left-color: var(--warn); }
+.msg.ok { border-left-color: var(--ok); }
+.msg.info { border-left-color: var(--muted); }
+
+.card { border: 1px solid var(--line); background: var(--panel); padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.pack-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; }
+.pack-head h2 { margin: 0; font-size: 1.35rem; letter-spacing: -0.01em; text-wrap: balance; overflow-wrap: anywhere; }
+.tag { font-family: var(--mono); font-size: 0.78rem; padding: 2px 8px; border: 1px solid var(--line); color: var(--muted); }
+.tag.src { color: var(--accent); border-color: var(--accent); }
+.muted { color: var(--muted); margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-family: var(--mono); font-size: 0.8rem; padding: 3px 9px; background: var(--sunk); border: 1px solid var(--line); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.stats div { min-width: 0; }
+.stats dt { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.stats dd { margin: 2px 0 0; font-family: var(--mono); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+
+h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 600; }
+.opts { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: flex-end; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field.wide { grid-column: 1 / -1; }
+.field label { font-size: 0.82rem; font-weight: 600; }
+.field input[type="text"], .field input[type="password"], .field select {
+  font: inherit; font-family: var(--mono); font-size: 0.9rem; color: var(--fg);
+  background: var(--panel); border: 1px solid var(--line); padding: 9px 10px; min-width: 0; width: 100%; border-radius: 0;
+}
+.field input:disabled { opacity: 0.5; }
+.check { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.92rem; }
+.check input { width: 16px; height: 16px; accent-color: var(--accent); }
+.cf { border: 1px solid var(--line); background: var(--panel); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.cf h3 { margin: 0; }
+.cf p { margin: 0; }
+.helper { font-family: var(--mono); font-size: 0.82rem; }
+.helper.on { color: var(--ok); }
+.helper.off { color: var(--warn); }
+
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn {
+  appearance: none; font: inherit; font-weight: 600; cursor: pointer;
+  background: var(--accent); color: var(--accent-fg); border: 1px solid var(--accent); padding: 11px 20px; border-radius: 0;
+}
+.btn:hover { filter: brightness(1.07); }
+.btn:disabled { opacity: 0.5; cursor: progress; filter: none; }
+.btn.ghost { background: transparent; color: var(--fg); border-color: var(--fg); }
+
+.progress { display: flex; flex-direction: column; gap: 6px; }
+.bar { height: 8px; background: var(--sunk); border: 1px solid var(--line); overflow: hidden; }
+.fill { height: 100%; width: 0; background: var(--accent); }
+.status { font-family: var(--mono); font-size: 0.84rem; color: var(--muted); overflow-wrap: anywhere; }
+
+/* Windowed list: only the rows in view exist in the DOM, however long the pack is. */
+.vlist { position: relative; overflow: auto; border: 1px solid var(--line); background: var(--panel); contain: strict; }
+.vin { position: relative; width: 100%; min-width: 0; }
+.vrow {
+  position: absolute; left: 0; right: 0; height: 34px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px;
+  align-items: center; padding: 0 12px; border-bottom: 1px solid var(--line); font-size: 0.85rem;
+}
+.vrow .path { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vrow .size { font-family: var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.8rem; white-space: nowrap; }
+.pill { font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 7px; border: 1px solid currentColor; color: var(--muted); white-space: nowrap; min-width: 4.5em; text-align: center; }
+.pill.run { color: var(--accent); }
+.pill.ok { color: var(--ok); }
+.pill.bad { color: var(--err); }
+.pill.warn { color: var(--warn); }
+
+.relay { border: 1px solid var(--line); background: var(--panel); }
+.relay summary { cursor: pointer; padding: 10px 14px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+.relay summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.relay-body { padding: 4px 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.relay-body p { margin: 0; }
+.foot { color: var(--muted); font-size: 0.84rem; max-width: 72ch; }
+@media (max-width: 520px) { .vrow { grid-template-columns: minmax(0, 1fr) auto; } .vrow .size { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 28 28" aria-hidden="true">
+        <rect x="2" y="2" width="11" height="11" fill="var(--accent)"/>
+        <rect x="15" y="2" width="11" height="11" fill="var(--fg)"/>
+        <rect x="2" y="15" width="11" height="11" fill="var(--fg)"/>
+        <rect x="16" y="16" width="9" height="9" fill="none" stroke="var(--fg)" stroke-width="2"/>
+      </svg>
+      <h1>Packshift</h1>
+    </div>
+    <p class="lede">Turn a Modrinth <code>.mrpack</code> or a CurseForge pack into a plain <code>.zip</code> with every mod and config file inside, or package an instance <code>.zip</code> or CurseForge pack as an <code>.mrpack</code>. Files are read and built in this page. Only mod downloads and lookups go online.</p>
+  </header>
+
+  <div id="boot-error" class="msg err" role="alert" hidden></div>
+
+  <div class="modes" role="tablist" aria-label="Conversion direction">
+    <button type="button" role="tab" id="tab-a" aria-selected="true" aria-controls="panel-a">.mrpack → .zip</button>
+    <button type="button" role="tab" id="tab-b" aria-selected="false" aria-controls="panel-b">.zip → .mrpack</button>
+  </div>
+
+  <details class="relay" id="relay">
+    <summary>Relay settings <span class="tag" id="relay-badge">off</span></summary>
+    <div class="relay-body">
+      <p class="muted">CurseForge packs, and some mod hosts, cannot be reached straight from a web page. A relay forwards those requests. Use the local helper (<code>node packshift-server.js</code>, open the address it prints) or paste the address of your own Cloudflare relay. Modrinth packs and instance zips usually work without either.</p>
+      <div class="field"><label for="relay-url">Relay address</label><input type="text" id="relay-url" placeholder="https://packshift-relay.your-name.workers.dev" autocomplete="off" spellcheck="false"></div>
+      <div class="helper" id="relay-status"></div>
+    </div>
+  </details>
+
+  <main>
+    <!-- to .zip -->
+    <section class="panel" id="panel-a" role="tabpanel" aria-labelledby="tab-a">
+      <label class="drop" id="a-drop" for="a-file">
+        <input type="file" id="a-file" accept=".mrpack,.zip">
+        <strong>Drop a .mrpack or a CurseForge pack here</strong>
+        <span>or click to choose a file</span>
+      </label>
+      <div id="a-error" class="msg err" role="alert" hidden></div>
+
+      <div id="a-pack" class="panel" hidden>
+        <div class="card">
+          <div class="pack-head"><h2 id="a-name"></h2><span id="a-ver" class="tag"></span><span id="a-src" class="tag src"></span></div>
+          <p id="a-summary" class="muted"></p>
+          <div id="a-deps" class="chips"></div>
+          <dl class="stats">
+            <div><dt>Files to download</dt><dd id="a-nfiles">0</dd></div>
+            <div><dt>Download size</dt><dd id="a-size">0 B</dd></div>
+            <div><dt>Bundled config files</dt><dd id="a-nover">0</dd></div>
+          </dl>
+        </div>
+
+        <div class="cf" id="a-cf" hidden></div>
+
+        <div class="opts">
+          <div class="field" id="a-target-wrap">
+            <label for="a-target">Build for</label>
+            <select id="a-target">
+              <option value="all">Everything (client and server)</option>
+              <option value="client">Client only</option>
+              <option value="server">Server only</option>
+            </select>
+          </div>
+          <label class="check"><input type="checkbox" id="a-keepindex"> <span id="a-keeplabel">Keep modrinth.index.json in the zip</span></label>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="btn" id="a-go">Download mods and build zip</button>
+          <button type="button" class="btn ghost" id="a-cancel" hidden>Cancel</button>
+          <button type="button" class="btn ghost" id="a-save" hidden>Save zip</button>
+        </div>
+
+        <div class="progress" id="a-progress" hidden>
+          <div class="bar"><div class="fill" id="a-fill"></div></div>
+          <div class="status" id="a-status" aria-live="polite"></div>
+        </div>
+        <div id="a-result" class="msg ok" hidden></div>
+        <div class="vlist" id="a-files" role="list" aria-label="Files in this pack" hidden></div>
+      </div>
+    </section>
+
+    <!-- to .mrpack -->
+    <section class="panel" id="panel-b" role="tabpanel" aria-labelledby="tab-b" hidden>
+      <label class="drop" id="b-drop" for="b-file">
+        <input type="file" id="b-file" accept=".zip">
+        <strong>Drop an instance .zip or a CurseForge pack here</strong>
+        <span>an instance zip holds your mods, config and other game folders</span>
+      </label>
+      <div id="b-error" class="msg err" role="alert" hidden></div>
+
+      <div id="b-pack" class="panel" hidden>
+        <div class="card">
+          <div class="pack-head"><h2 id="b-found"></h2><span id="b-src" class="tag src"></span></div>
+          <p class="muted" id="b-detail"></p>
+          <dl class="stats">
+            <div><dt id="b-l1">Mods</dt><dd id="b-nmods">0</dd></div>
+            <div><dt id="b-l2">Packs and shaders</dt><dd id="b-nres">0</dd></div>
+            <div><dt id="b-l3">Other files</dt><dd id="b-nother">0</dd></div>
+          </dl>
+        </div>
+        <div id="b-note" class="msg info" hidden></div>
+
+        <div class="cf" id="b-cf" hidden></div>
+
+        <h3 class="sect">Pack details</h3>
+        <div class="fields">
+          <div class="field"><label for="b-name">Pack name</label><input type="text" id="b-name" autocomplete="off"></div>
+          <div class="field"><label for="b-version">Pack version</label><input type="text" id="b-version" value="1.0.0" autocomplete="off"></div>
+          <div class="field wide"><label for="b-summary">Summary (optional)</label><input type="text" id="b-summary" autocomplete="off"></div>
+          <div class="field"><label for="b-mc">Minecraft version</label><input type="text" id="b-mc" placeholder="1.20.1" autocomplete="off"></div>
+          <div class="field">
+            <label for="b-loader">Mod loader</label>
+            <select id="b-loader">
+              <option value="fabric-loader">Fabric</option>
+              <option value="quilt-loader">Quilt</option>
+              <option value="forge">Forge</option>
+              <option value="neoforge">NeoForge</option>
+              <option value="none">None (vanilla)</option>
+            </select>
+          </div>
+          <div class="field"><label for="b-loaderver">Loader version</label><input type="text" id="b-loaderver" placeholder="0.15.7" autocomplete="off"></div>
+        </div>
+        <label class="check" id="b-skipwrap"><input type="checkbox" id="b-skip" checked> Leave out logs, crash reports, screenshots, saves and caches</label>
+
+        <div class="actions">
+          <button type="button" class="btn" id="b-go">Match mods and build .mrpack</button>
+          <button type="button" class="btn ghost" id="b-cancel" hidden>Cancel</button>
+          <button type="button" class="btn ghost" id="b-save" hidden>Save .mrpack</button>
+        </div>
+
+        <div class="progress" id="b-progress" hidden>
+          <div class="bar"><div class="fill" id="b-fill"></div></div>
+          <div class="status" id="b-status" aria-live="polite"></div>
+        </div>
+        <div id="b-result" class="msg ok" hidden></div>
+        <div class="vlist" id="b-files" role="list" aria-label="Matched files" hidden></div>
+      </div>
+    </section>
+  </main>
+
+  <p class="foot">Each mod in an .mrpack is a download link plus a checksum, so a zip built from one is only as complete as the download servers allow. Mods that Modrinth does not know about stay inside a new .mrpack as bundled files, so check that each license allows redistribution before you share the pack. In Chrome and Edge the result is written straight to the file you pick, so big packs do not need to fit in memory. Other browsers build the file in memory first.</p>
+</div>
+
+<script>!function(f){typeof module!='undefined'&&typeof exports=='object'?module.exports=f():typeof define!='undefined'&&define.amd?define(f):(typeof self!='undefined'?self:this).fflate=f()}(function(){var _e={};"use strict";var t=(typeof module!='undefined'&&typeof exports=='object'?function(_f){"use strict";var e,t=";var __w=require('worker_threads');__w.parentPort.on('message',function(m){onmessage({data:m})}),postMessage=function(m,t){__w.parentPort.postMessage(m,t)},close=process.exit;self=global";try{e=require("worker_threads").Worker}catch(e){}exports.default=e?function(r,n,o,a,s){var u=!1,i=new e(r+t,{eval:!0}).on("error",(function(e){return s(e,null)})).on("message",(function(e){return s(null,e)})).on("exit",(function(e){e&&!u&&s(Error("exited with code "+e),null)}));return i.postMessage(o,a),i.terminate=function(){return u=!0,e.prototype.terminate.call(i)},i}:function(e,t,r,n,o){setImmediate((function(){return o(Error("async operations unsupported - update to Node 12+ (or Node 10-11 with the --experimental-worker CLI flag)"),null)}));var a=function(){};return{terminate:a,postMessage:a}};return _f}:function(_f){"use strict";var e={};_f.default=function(r,t,s,a,n){var o=new Worker(e[t]||(e[t]=URL.createObjectURL(new Blob([r+';addEventListener("error",function(e){e=e.error;postMessage({$e$:[e.message,e.code,e.stack]})})'],{type:"text/javascript"}))));return o.onmessage=function(e){var r=e.data,t=r.$e$;if(t){var s=Error(t[0]);s.code=t[1],s.stack=t[2],n(s,null)}else n(null,r)},o.postMessage(s,a),o};return _f})({}),n=Uint8Array,r=Uint16Array,e=Int32Array,i=new n([0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0,0,0,0]),o=new n([0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,0,0]),s=new n([16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15]),a=function(t,n){for(var i=new r(31),o=0;o<31;++o)i[o]=n+=1<<t[o-1];var s=new e(i[30]);for(o=1;o<30;++o)for(var a=i[o];a<i[o+1];++a)s[a]=a-i[o]<<5|o;return{b:i,r:s}},u=a(i,2),h=u.b,f=u.r;h[28]=258,f[258]=28;for(var l=a(o,0),c=l.b,p=l.r,v=new r(32768),d=0;d<32768;++d){var g=(43690&d)>>1|(21845&d)<<1;v[d]=((65280&(g=(61680&(g=(52428&g)>>2|(13107&g)<<2))>>4|(3855&g)<<4))>>8|(255&g)<<8)>>1}var y=function(t,n,e){for(var i=t.length,o=0,s=new r(n);o<i;++o)t[o]&&++s[t[o]-1];var a,u=new r(n);for(o=1;o<n;++o)u[o]=u[o-1]+s[o-1]<<1;if(e){a=new r(1<<n);var h=15-n;for(o=0;o<i;++o)if(t[o])for(var f=o<<4|t[o],l=n-t[o],c=u[t[o]-1]++<<l,p=c|(1<<l)-1;c<=p;++c)a[v[c]>>h]=f}else for(a=new r(i),o=0;o<i;++o)t[o]&&(a[o]=v[u[t[o]-1]++]>>15-t[o]);return a},m=new n(288);for(d=0;d<144;++d)m[d]=8;for(d=144;d<256;++d)m[d]=9;for(d=256;d<280;++d)m[d]=7;for(d=280;d<288;++d)m[d]=8;var b=new n(32);for(d=0;d<32;++d)b[d]=5;var w=y(m,9,0),x=y(m,9,1),z=y(b,5,0),k=y(b,5,1),M=function(t){for(var n=t[0],r=1;r<t.length;++r)t[r]>n&&(n=t[r]);return n},S=function(t,n,r){var e=n/8|0;return(t[e]|t[e+1]<<8)>>(7&n)&r},A=function(t,n){var r=n/8|0;return(t[r]|t[r+1]<<8|t[r+2]<<16)>>(7&n)},T=function(t){return(t+7)/8|0},D=function(t,r,e){return(null==r||r<0)&&(r=0),(null==e||e>t.length)&&(e=t.length),new n(t.subarray(r,e))};_e.FlateErrorCode={UnexpectedEOF:0,InvalidBlockType:1,InvalidLengthLiteral:2,InvalidDistance:3,StreamFinished:4,NoStreamHandler:5,InvalidHeader:6,NoCallback:7,InvalidUTF8:8,ExtraFieldTooLong:9,InvalidDate:10,FilenameTooLong:11,StreamFinishing:12,InvalidZipData:13,UnknownCompressionMethod:14};var C=["unexpected EOF","invalid block type","invalid length/literal","invalid distance","stream finished","no stream handler",,"no callback","invalid UTF-8 data","extra field too long","date not in range 1980-2099","filename too long","stream finishing","invalid zip data"],I=function(t,n,r){var e=Error(n||C[t]);if(e.code=t,Error.captureStackTrace&&Error.captureStackTrace(e,I),!r)throw e;return e},U=function(t,r,e,a){var u=t.length,f=a?a.length:0;if(!u||r.f&&!r.l)return e||new n(0);var l=!e,p=l||2!=r.i,v=r.i;l&&(e=new n(3*u));var d=function(t){var r=e.length;if(t>r){var i=new n(Math.max(2*r,t));i.set(e),e=i}},g=r.f||0,m=r.p||0,b=r.b||0,w=r.l,z=r.d,C=r.m,U=r.n,F=8*u;do{if(!w){g=S(t,m,1);var E=S(t,m+1,3);if(m+=3,!E){var Z=t[(J=T(m)+4)-4]|t[J-3]<<8,q=J+Z;if(q>u){v&&I(0);break}p&&d(b+Z),e.set(t.subarray(J,q),b),r.b=b+=Z,r.p=m=8*q,r.f=g;continue}if(1==E)w=x,z=k,C=9,U=5;else if(2==E){var O=S(t,m,31)+257,G=S(t,m+10,15)+4,L=O+S(t,m+5,31)+1;m+=14;for(var H=new n(L),j=new n(19),N=0;N<G;++N)j[s[N]]=S(t,m+3*N,7);m+=3*G;var P=M(j),B=(1<<P)-1,Y=y(j,P,1);for(N=0;N<L;){var J,K=Y[S(t,m,B)];if(m+=15&K,(J=K>>4)<16)H[N++]=J;else{var Q=0,R=0;for(16==J?(R=3+S(t,m,3),m+=2,Q=H[N-1]):17==J?(R=3+S(t,m,7),m+=3):18==J&&(R=11+S(t,m,127),m+=7);R--;)H[N++]=Q}}var V=H.subarray(0,O),W=H.subarray(O);C=M(V),U=M(W),w=y(V,C,1),z=y(W,U,1)}else I(1);if(m>F){v&&I(0);break}}p&&d(b+131072);for(var X=(1<<C)-1,$=(1<<U)-1,_=m;;_=m){var tt=(Q=w[A(t,m)&X])>>4;if((m+=15&Q)>F){v&&I(0);break}if(Q||I(2),tt<256)e[b++]=tt;else{if(256==tt){_=m,w=null;break}var nt=tt-254;tt>264&&(nt=S(t,m,(1<<(it=i[N=tt-257]))-1)+h[N],m+=it);var rt=z[A(t,m)&$],et=rt>>4;if(rt||I(3),m+=15&rt,W=c[et],et>3){var it=o[et];W+=A(t,m)&(1<<it)-1,m+=it}if(m>F){v&&I(0);break}p&&d(b+131072);var ot=b+nt;if(b<W){var st=f-W,at=Math.min(W,ot);for(st+b<0&&I(3);b<at;++b)e[b]=a[st+b]}for(;b<ot;++b)e[b]=e[b-W]}}r.l=w,r.p=_,r.b=b,r.f=g,w&&(g=1,r.m=C,r.d=z,r.n=U)}while(!g);return b!=e.length&&l?D(e,0,b):e.subarray(0,b)},F=function(t,n,r){var e=n/8|0;t[e]|=r<<=7&n,t[e+1]|=r>>8},E=function(t,n,r){var e=n/8|0;t[e]|=r<<=7&n,t[e+1]|=r>>8,t[e+2]|=r>>16},Z=function(t,e){for(var i=[],o=0;o<t.length;++o)t[o]&&i.push({s:o,f:t[o]});var s=i.length,a=i.slice();if(!s)return{t:N,l:0};if(1==s){var u=new n(i[0].s+1);return u[i[0].s]=1,{t:u,l:1}}i.sort((function(t,n){return t.f-n.f})),i.push({s:-1,f:25001});var h=i[0],f=i[1],l=0,c=1,p=2;for(i[0]={s:-1,f:h.f+f.f,l:h,r:f};c!=s-1;)h=i[i[l].f<i[p].f?l++:p++],f=i[l!=c&&i[l].f<i[p].f?l++:p++],i[c++]={s:-1,f:h.f+f.f,l:h,r:f};var v=a[0].s;for(o=1;o<s;++o)a[o].s>v&&(v=a[o].s);var d=new r(v+1),g=q(i[c-1],d,0);if(g>e){o=0;var y=0,m=g-e,b=1<<m;for(a.sort((function(t,n){return d[n.s]-d[t.s]||t.f-n.f}));o<s;++o){var w=a[o].s;if(!(d[w]>e))break;y+=b-(1<<g-d[w]),d[w]=e}for(y>>=m;y>0;){var x=a[o].s;d[x]<e?y-=1<<e-d[x]++-1:++o}for(;o>=0&&y;--o){var z=a[o].s;d[z]==e&&(--d[z],++y)}g=e}return{t:new n(d),l:g}},q=function(t,n,r){return-1==t.s?Math.max(q(t.l,n,r+1),q(t.r,n,r+1)):n[t.s]=r},O=function(t){for(var n=t.length;n&&!t[--n];);for(var e=new r(++n),i=0,o=t[0],s=1,a=function(t){e[i++]=t},u=1;u<=n;++u)if(t[u]==o&&u!=n)++s;else{if(!o&&s>2){for(;s>138;s-=138)a(32754);s>2&&(a(s>10?s-11<<5|28690:s-3<<5|12305),s=0)}else if(s>3){for(a(o),--s;s>6;s-=6)a(8304);s>2&&(a(s-3<<5|8208),s=0)}for(;s--;)a(o);s=1,o=t[u]}return{c:e.subarray(0,i),n:n}},G=function(t,n){for(var r=0,e=0;e<n.length;++e)r+=t[e]*n[e];return r},L=function(t,n,r){var e=r.length,i=T(n+2);t[i]=255&e,t[i+1]=e>>8,t[i+2]=255^t[i],t[i+3]=255^t[i+1];for(var o=0;o<e;++o)t[i+o+4]=r[o];return 8*(i+4+e)},H=function(t,n,e,a,u,h,f,l,c,p,v){F(n,v++,e),++u[256];for(var d=Z(u,15),g=d.t,x=d.l,k=Z(h,15),M=k.t,S=k.l,A=O(g),T=A.c,D=A.n,C=O(M),I=C.c,U=C.n,q=new r(19),H=0;H<T.length;++H)++q[31&T[H]];for(H=0;H<I.length;++H)++q[31&I[H]];for(var j=Z(q,7),N=j.t,P=j.l,B=19;B>4&&!N[s[B-1]];--B);var Y,J,K,Q,R=p+5<<3,V=G(u,m)+G(h,b)+f,W=G(u,g)+G(h,M)+f+14+3*B+G(q,N)+2*q[16]+3*q[17]+7*q[18];if(c>=0&&R<=V&&R<=W)return L(n,v,t.subarray(c,c+p));if(F(n,v,1+(W<V)),v+=2,W<V){Y=y(g,x,0),J=g,K=y(M,S,0),Q=M;var X=y(N,P,0);for(F(n,v,D-257),F(n,v+5,U-1),F(n,v+10,B-4),v+=14,H=0;H<B;++H)F(n,v+3*H,N[s[H]]);v+=3*B;for(var $=[T,I],_=0;_<2;++_){var tt=$[_];for(H=0;H<tt.length;++H)F(n,v,X[rt=31&tt[H]]),v+=N[rt],rt>15&&(F(n,v,tt[H]>>5&127),v+=tt[H]>>12)}}else Y=w,J=m,K=z,Q=b;for(H=0;H<l;++H){var nt=a[H];if(nt>255){var rt;E(n,v,Y[257+(rt=nt>>18&31)]),v+=J[rt+257],rt>7&&(F(n,v,nt>>23&31),v+=i[rt]);var et=31&nt;E(n,v,K[et]),v+=Q[et],et>3&&(E(n,v,nt>>5&8191),v+=o[et])}else E(n,v,Y[nt]),v+=J[nt]}return E(n,v,Y[256]),v+J[256]},j=new e([65540,131080,131088,131104,262176,1048704,1048832,2114560,2117632]),N=new n(0),P=function(t,s,a,u,h,l){var c=l.z||t.length,v=new n(u+c+5*(1+Math.ceil(c/7e3))+h),d=v.subarray(u,v.length-h),g=l.l,y=7&(l.r||0);if(s){y&&(d[0]=l.r>>3);for(var m=j[s-1],b=m>>13,w=8191&m,x=(1<<a)-1,z=l.p||new r(32768),k=l.h||new r(x+1),M=Math.ceil(a/3),S=2*M,A=function(n){return(t[n]^t[n+1]<<M^t[n+2]<<S)&x},C=new e(25e3),I=new r(288),U=new r(32),F=0,E=0,Z=l.i||0,q=0,O=l.w||0,G=0;Z+2<c;++Z){var N=A(Z),P=32767&Z,B=k[N];if(z[P]=B,k[N]=P,O<=Z){var Y=c-Z;if((F>7e3||q>24576)&&(Y>423||!g)){y=H(t,d,0,C,I,U,E,q,G,Z-G,y),q=F=E=0,G=Z;for(var J=0;J<286;++J)I[J]=0;for(J=0;J<30;++J)U[J]=0}var K=2,Q=0,R=w,V=P-B&32767;if(Y>2&&N==A(Z-V))for(var W=Math.min(b,Y)-1,X=Math.min(32767,Z),$=Math.min(258,Y);V<=X&&--R&&P!=B;){if(t[Z+K]==t[Z+K-V]){for(var _=0;_<$&&t[Z+_]==t[Z+_-V];++_);if(_>K){if(K=_,Q=V,_>W)break;var tt=Math.min(V,_-2),nt=0;for(J=0;J<tt;++J){var rt=Z-V+J&32767,et=rt-z[rt]&32767;et>nt&&(nt=et,B=rt)}}}V+=(P=B)-(B=z[P])&32767}if(Q){C[q++]=268435456|f[K]<<18|p[Q];var it=31&f[K],ot=31&p[Q];E+=i[it]+o[ot],++I[257+it],++U[ot],O=Z+K,++F}else C[q++]=t[Z],++I[t[Z]]}}for(Z=Math.max(Z,O);Z<c;++Z)C[q++]=t[Z],++I[t[Z]];y=H(t,d,g,C,I,U,E,q,G,Z-G,y),g||(l.r=7&y|d[y/8|0]<<3,y-=7,l.h=k,l.p=z,l.i=Z,l.w=O)}else{for(Z=l.w||0;Z<c+g;Z+=65535){var st=Z+65535;st>=c&&(d[y/8|0]=g,st=c),y=L(d,y+1,t.subarray(Z,st))}l.i=c}return D(v,0,u+T(y)+h)},B=function(){for(var t=new Int32Array(256),n=0;n<256;++n){for(var r=n,e=9;--e;)r=(1&r&&-306674912)^r>>>1;t[n]=r}return t}(),Y=function(){var t=-1;return{p:function(n){for(var r=t,e=0;e<n.length;++e)r=B[255&r^n[e]]^r>>>8;t=r},d:function(){return~t}}},J=function(){var t=1,n=0;return{p:function(r){for(var e=t,i=n,o=0|r.length,s=0;s!=o;){for(var a=Math.min(s+2655,o);s<a;++s)i+=e+=r[s];e=(65535&e)+15*(e>>16),i=(65535&i)+15*(i>>16)}t=e,n=i},d:function(){return(255&(t%=65521))<<24|(65280&t)<<8|(255&(n%=65521))<<8|n>>8}}},K=function(t,r,e,i,o){if(!o&&(o={l:1},r.dictionary)){var s=r.dictionary.subarray(-32768),a=new n(s.length+t.length);a.set(s),a.set(t,s.length),t=a,o.w=s.length}return P(t,null==r.level?6:r.level,null==r.mem?o.l?Math.ceil(1.5*Math.max(8,Math.min(13,Math.log(t.length)))):20:12+r.mem,e,i,o)},Q=function(t,n){var r={};for(var e in t)r[e]=t[e];for(var e in n)r[e]=n[e];return r},R=function(t,n,r){for(var e=t(),i=""+t,o=i.slice(i.indexOf("[")+1,i.lastIndexOf("]")).replace(/\s+/g,"").split(","),s=0;s<e.length;++s){var a=e[s],u=o[s];if("function"==typeof a){n+=";"+u+"=";var h=""+a;if(a.prototype)if(-1!=h.indexOf("[native code]")){var f=h.indexOf(" ",8)+1;n+=h.slice(f,h.indexOf("(",f))}else for(var l in n+=h,a.prototype)n+=";"+u+".prototype."+l+"="+a.prototype[l];else n+=h}else r[u]=a}return n},V=[],W=function(t){var n=[];for(var r in t)t[r].buffer&&n.push((t[r]=new t[r].constructor(t[r])).buffer);return n},X=function(n,r,e,i){if(!V[e]){for(var o="",s={},a=n.length-1,u=0;u<a;++u)o=R(n[u],o,s);V[e]={c:R(n[a],o,s),e:s}}var h=Q({},V[e].e);return(0,t.default)(V[e].c+";onmessage=function(e){for(var k in e.data)self[k]=e.data[k];onmessage="+r+"}",e,h,W(h),i)},$=function(){return[n,r,e,i,o,s,h,c,x,k,v,C,y,M,S,A,T,D,I,U,Tt,it,ot]},_=function(){return[n,r,e,i,o,s,f,p,w,m,z,b,v,j,N,y,F,E,Z,q,O,G,L,H,T,D,P,K,kt,it]},tt=function(){return[pt,gt,ct,Y,B]},nt=function(){return[vt,dt]},rt=function(){return[yt,ct,J]},et=function(){return[mt]},it=function(t){return postMessage(t,[t.buffer])},ot=function(t){return t&&{out:t.size&&new n(t.size),dictionary:t.dictionary}},st=function(t,n,r,e,i,o){var s=X(r,e,i,(function(t,n){s.terminate(),o(t,n)}));return s.postMessage([t,n],n.consume?[t.buffer]:[]),function(){s.terminate()}},at=function(t){return t.ondata=function(t,n){return postMessage([t,n],[t.buffer])},function(n){n.data.length?(t.push(n.data[0],n.data[1]),postMessage([n.data[0].length])):t.flush()}},ut=function(t,n,r,e,i,o,s){var a,u=X(t,e,i,(function(t,r){t?(u.terminate(),n.ondata.call(n,t)):Array.isArray(r)?1==r.length?(n.queuedSize-=r[0],n.ondrain&&n.ondrain(r[0])):(r[1]&&u.terminate(),n.ondata.call(n,t,r[0],r[1])):s(r)}));u.postMessage(r),n.queuedSize=0,n.push=function(t,r){n.ondata||I(5),a&&n.ondata(I(4,0,1),null,!!r),n.queuedSize+=t.length,u.postMessage([t,a=r],[t.buffer])},n.terminate=function(){u.terminate()},o&&(n.flush=function(){u.postMessage([])})},ht=function(t,n){return t[n]|t[n+1]<<8},ft=function(t,n){return(t[n]|t[n+1]<<8|t[n+2]<<16|t[n+3]<<24)>>>0},lt=function(t,n){return ft(t,n)+4294967296*ft(t,n+4)},ct=function(t,n,r){for(;r;++n)t[n]=r,r>>>=8},pt=function(t,n){var r=n.filename;if(t[0]=31,t[1]=139,t[2]=8,t[8]=n.level<2?4:9==n.level?2:0,t[9]=3,0!=n.mtime&&ct(t,4,Math.floor(new Date(n.mtime||Date.now())/1e3)),r){t[3]=8;for(var e=0;e<=r.length;++e)t[e+10]=r.charCodeAt(e)}},vt=function(t){31==t[0]&&139==t[1]&&8==t[2]||I(6,"invalid gzip data");var n=t[3],r=10;4&n&&(r+=2+(t[10]|t[11]<<8));for(var e=(n>>3&1)+(n>>4&1);e>0;e-=!t[r++]);return r+(2&n)},dt=function(t){var n=t.length;return(t[n-4]|t[n-3]<<8|t[n-2]<<16|t[n-1]<<24)>>>0},gt=function(t){return 10+(t.filename?t.filename.length+1:0)},yt=function(t,n){var r=n.level,e=0==r?0:r<6?1:9==r?3:2;if(t[0]=120,t[1]=e<<6|(n.dictionary&&32),t[1]|=31-(t[0]<<8|t[1])%31,n.dictionary){var i=J();i.p(n.dictionary),ct(t,2,i.d())}},mt=function(t,n){return(8!=(15&t[0])||t[0]>>4>7||(t[0]<<8|t[1])%31)&&I(6,"invalid zlib data"),(t[1]>>5&1)==+!n&&I(6,"invalid zlib data: "+(32&t[1]?"need":"unexpected")+" dictionary"),2+(t[1]>>3&4)};function bt(t,n){return"function"==typeof t&&(n=t,t={}),this.ondata=n,t}var wt=function(){function t(t,r){if("function"==typeof t&&(r=t,t={}),this.ondata=r,this.o=t||{},this.s={l:0,i:32768,w:32768,z:32768},this.b=new n(98304),this.o.dictionary){var e=this.o.dictionary.subarray(-32768);this.b.set(e,32768-e.length),this.s.i=32768-e.length}}return t.prototype.p=function(t,n){this.ondata(K(t,this.o,0,0,this.s),n)},t.prototype.push=function(t,r){this.ondata||I(5),this.s.l&&I(4);var e=t.length+this.s.z;if(e>this.b.length){if(e>2*this.b.length-32768){var i=new n(-32768&e);i.set(this.b.subarray(0,this.s.z)),this.b=i}var o=this.b.length-this.s.z;this.b.set(t.subarray(0,o),this.s.z),this.s.z=this.b.length,this.p(this.b,!1),this.b.set(this.b.subarray(-32768)),this.b.set(t.subarray(o),32768),this.s.z=t.length-o+32768,this.s.i=32766,this.s.w=32768}else this.b.set(t,this.s.z),this.s.z+=t.length;this.s.l=1&r,(this.s.z>this.s.w+8191||r)&&(this.p(this.b,r||!1),this.s.w=this.s.i,this.s.i-=2)},t.prototype.flush=function(){this.ondata||I(5),this.s.l&&I(4),this.p(this.b,!1),this.s.w=this.s.i,this.s.i-=2},t}();_e.Deflate=wt;var xt=function(){return function(t,n){ut([_,function(){return[at,wt]}],this,bt.call(this,t,n),(function(t){var n=new wt(t.data);onmessage=at(n)}),6,1)}}();function zt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[_],(function(t){return it(kt(t.data[0],t.data[1]))}),0,r)}function kt(t,n){return K(t,n||{},0,0)}_e.AsyncDeflate=xt,_e.deflate=zt,_e.deflateSync=kt;var Mt=function(){function t(t,r){"function"==typeof t&&(r=t,t={}),this.ondata=r;var e=t&&t.dictionary&&t.dictionary.subarray(-32768);this.s={i:0,b:e?e.length:0},this.o=new n(32768),this.p=new n(0),e&&this.o.set(e)}return t.prototype.e=function(t){if(this.ondata||I(5),this.d&&I(4),this.p.length){if(t.length){var r=new n(this.p.length+t.length);r.set(this.p),r.set(t,this.p.length),this.p=r}}else this.p=t},t.prototype.c=function(t){this.s.i=+(this.d=t||!1);var n=this.s.b,r=U(this.p,this.s,this.o);this.ondata(D(r,n,this.s.b),this.d),this.o=D(r,this.s.b-32768),this.s.b=this.o.length,this.p=D(this.p,this.s.p/8|0),this.s.p&=7},t.prototype.push=function(t,n){this.e(t),this.c(n)},t}();_e.Inflate=Mt;var St=function(){return function(t,n){ut([$,function(){return[at,Mt]}],this,bt.call(this,t,n),(function(t){var n=new Mt(t.data);onmessage=at(n)}),7,0)}}();function At(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[$],(function(t){return it(Tt(t.data[0],ot(t.data[1])))}),1,r)}function Tt(t,n){return U(t,{i:2},n&&n.out,n&&n.dictionary)}_e.AsyncInflate=St,_e.inflate=At,_e.inflateSync=Tt;var Dt=function(){function t(t,n){this.c=Y(),this.l=0,this.v=1,wt.call(this,t,n)}return t.prototype.push=function(t,n){this.c.p(t),this.l+=t.length,wt.prototype.push.call(this,t,n)},t.prototype.p=function(t,n){var r=K(t,this.o,this.v&&gt(this.o),n&&8,this.s);this.v&&(pt(r,this.o),this.v=0),n&&(ct(r,r.length-8,this.c.d()),ct(r,r.length-4,this.l)),this.ondata(r,n)},t.prototype.flush=function(){wt.prototype.flush.call(this)},t}();_e.Gzip=Dt,_e.Compress=Dt;var Ct=function(){return function(t,n){ut([_,tt,function(){return[at,wt,Dt]}],this,bt.call(this,t,n),(function(t){var n=new Dt(t.data);onmessage=at(n)}),8,1)}}();function It(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[_,tt,function(){return[Ut]}],(function(t){return it(Ut(t.data[0],t.data[1]))}),2,r)}function Ut(t,n){n||(n={});var r=Y(),e=t.length;r.p(t);var i=K(t,n,gt(n),8),o=i.length;return pt(i,n),ct(i,o-8,r.d()),ct(i,o-4,e),i}_e.AsyncGzip=Ct,_e.AsyncCompress=Ct,_e.gzip=It,_e.compress=It,_e.gzipSync=Ut,_e.compressSync=Ut;var Ft=function(){function t(t,n){this.v=1,this.r=0,Mt.call(this,t,n)}return t.prototype.push=function(t,r){if(Mt.prototype.e.call(this,t),this.r+=t.length,this.v){var e=this.p.subarray(this.v-1),i=e.length>3?vt(e):4;if(i>e.length){if(!r)return}else this.v>1&&this.onmember&&this.onmember(this.r-e.length);this.p=e.subarray(i),this.v=0}Mt.prototype.c.call(this,r),!this.s.f||this.s.l||r||(this.v=T(this.s.p)+9,this.s={i:0},this.o=new n(0),this.push(new n(0),r))},t}();_e.Gunzip=Ft;var Et=function(){return function(t,n){var r=this;ut([$,nt,function(){return[at,Mt,Ft]}],this,bt.call(this,t,n),(function(t){var n=new Ft(t.data);n.onmember=function(t){return postMessage(t)},onmessage=at(n)}),9,0,(function(t){return r.onmember&&r.onmember(t)}))}}();function Zt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[$,nt,function(){return[qt]}],(function(t){return it(qt(t.data[0],t.data[1]))}),3,r)}function qt(t,r){var e=vt(t);return e+8>t.length&&I(6,"invalid gzip data"),U(t.subarray(e,-8),{i:2},r&&r.out||new n(dt(t)),r&&r.dictionary)}_e.AsyncGunzip=Et,_e.gunzip=Zt,_e.gunzipSync=qt;var Ot=function(){function t(t,n){this.c=J(),this.v=1,wt.call(this,t,n)}return t.prototype.push=function(t,n){this.c.p(t),wt.prototype.push.call(this,t,n)},t.prototype.p=function(t,n){var r=K(t,this.o,this.v&&(this.o.dictionary?6:2),n&&4,this.s);this.v&&(yt(r,this.o),this.v=0),n&&ct(r,r.length-4,this.c.d()),this.ondata(r,n)},t.prototype.flush=function(){wt.prototype.flush.call(this)},t}();_e.Zlib=Ot;var Gt=function(){return function(t,n){ut([_,rt,function(){return[at,wt,Ot]}],this,bt.call(this,t,n),(function(t){var n=new Ot(t.data);onmessage=at(n)}),10,1)}}();function Lt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[_,rt,function(){return[Ht]}],(function(t){return it(Ht(t.data[0],t.data[1]))}),4,r)}function Ht(t,n){n||(n={});var r=J();r.p(t);var e=K(t,n,n.dictionary?6:2,4);return yt(e,n),ct(e,e.length-4,r.d()),e}_e.AsyncZlib=Gt,_e.zlib=Lt,_e.zlibSync=Ht;var jt=function(){function t(t,n){Mt.call(this,t,n),this.v=t&&t.dictionary?2:1}return t.prototype.push=function(t,n){if(Mt.prototype.e.call(this,t),this.v){if(this.p.length<6&&!n)return;this.p=this.p.subarray(mt(this.p,this.v-1)),this.v=0}n&&(this.p.length<4&&I(6,"invalid zlib data"),this.p=this.p.subarray(0,-4)),Mt.prototype.c.call(this,n)},t}();_e.Unzlib=jt;var Nt=function(){return function(t,n){ut([$,et,function(){return[at,Mt,jt]}],this,bt.call(this,t,n),(function(t){var n=new jt(t.data);onmessage=at(n)}),11,0)}}();function Pt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[$,et,function(){return[Bt]}],(function(t){return it(Bt(t.data[0],ot(t.data[1])))}),5,r)}function Bt(t,n){return U(t.subarray(mt(t,n&&n.dictionary),-4),{i:2},n&&n.out,n&&n.dictionary)}_e.AsyncUnzlib=Nt,_e.unzlib=Pt,_e.unzlibSync=Bt;var Yt=function(){function t(t,n){this.o=bt.call(this,t,n)||{},this.G=Ft,this.I=Mt,this.Z=jt}return t.prototype.i=function(){var t=this;this.s.ondata=function(n,r){t.ondata(n,r)}},t.prototype.push=function(t,r){if(this.ondata||I(5),this.s)this.s.push(t,r);else{if(this.p&&this.p.length){var e=new n(this.p.length+t.length);e.set(this.p),e.set(t,this.p.length)}else this.p=t;this.p.length>2&&(this.s=31==this.p[0]&&139==this.p[1]&&8==this.p[2]?new this.G(this.o):8!=(15&this.p[0])||this.p[0]>>4>7||(this.p[0]<<8|this.p[1])%31?new this.I(this.o):new this.Z(this.o),this.i(),this.s.push(this.p,r),this.p=null)}},t}();_e.Decompress=Yt;var Jt=function(){function t(t,n){Yt.call(this,t,n),this.queuedSize=0,this.G=Et,this.I=St,this.Z=Nt}return t.prototype.i=function(){var t=this;this.s.ondata=function(n,r,e){t.ondata(n,r,e)},this.s.ondrain=function(n){t.queuedSize-=n,t.ondrain&&t.ondrain(n)}},t.prototype.push=function(t,n){this.queuedSize+=t.length,Yt.prototype.push.call(this,t,n)},t}();function Kt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),31==t[0]&&139==t[1]&&8==t[2]?Zt(t,n,r):8!=(15&t[0])||t[0]>>4>7||(t[0]<<8|t[1])%31?At(t,n,r):Pt(t,n,r)}function Qt(t,n){return 31==t[0]&&139==t[1]&&8==t[2]?qt(t,n):8!=(15&t[0])||t[0]>>4>7||(t[0]<<8|t[1])%31?Tt(t,n):Bt(t,n)}_e.AsyncDecompress=Jt,_e.decompress=Kt,_e.decompressSync=Qt;var Rt=function(t,r,e,i){for(var o in t){var s=t[o],a=r+o,u=i;Array.isArray(s)&&(u=Q(i,s[1]),s=s[0]),s instanceof n?e[a]=[s,u]:(e[a+="/"]=[new n(0),u],Rt(s,a,e,i))}},Vt="undefined"!=typeof TextEncoder&&new TextEncoder,Wt="undefined"!=typeof TextDecoder&&new TextDecoder,Xt=0;try{Wt.decode(N,{stream:!0}),Xt=1}catch(t){}var $t=function(t){for(var n="",r=0;;){var e=t[r++],i=(e>127)+(e>223)+(e>239);if(r+i>t.length)return{s:n,r:D(t,r-1)};i?3==i?(e=((15&e)<<18|(63&t[r++])<<12|(63&t[r++])<<6|63&t[r++])-65536,n+=String.fromCharCode(55296|e>>10,56320|1023&e)):n+=String.fromCharCode(1&i?(31&e)<<6|63&t[r++]:(15&e)<<12|(63&t[r++])<<6|63&t[r++]):n+=String.fromCharCode(e)}},_t=function(){function t(t){this.ondata=t,Xt?this.t=new TextDecoder:this.p=N}return t.prototype.push=function(t,r){if(this.ondata||I(5),r=!!r,this.t)return this.ondata(this.t.decode(t,{stream:!0}),r),void(r&&(this.t.decode().length&&I(8),this.t=null));this.p||I(4);var e=new n(this.p.length+t.length);e.set(this.p),e.set(t,this.p.length);var i=$t(e),o=i.s,s=i.r;r?(s.length&&I(8),this.p=null):this.p=s,this.ondata(o,r)},t}();_e.DecodeUTF8=_t;var tn=function(){function t(t){this.ondata=t}return t.prototype.push=function(t,n){this.ondata||I(5),this.d&&I(4),this.ondata(nn(t),this.d=n||!1)},t}();function nn(t,r){if(r){for(var e=new n(t.length),i=0;i<t.length;++i)e[i]=t.charCodeAt(i);return e}if(Vt)return Vt.encode(t);var o=t.length,s=new n(t.length+(t.length>>1)),a=0,u=function(t){s[a++]=t};for(i=0;i<o;++i){if(a+5>s.length){var h=new n(a+8+(o-i<<1));h.set(s),s=h}var f=t.charCodeAt(i);f<128||r?u(f):f<2048?(u(192|f>>6),u(128|63&f)):f>55295&&f<57344?(u(240|(f=65536+(1047552&f)|1023&t.charCodeAt(++i))>>18),u(128|f>>12&63),u(128|f>>6&63),u(128|63&f)):(u(224|f>>12),u(128|f>>6&63),u(128|63&f))}return D(s,0,a)}function rn(t,n){if(n){for(var r="",e=0;e<t.length;e+=16384)r+=String.fromCharCode.apply(null,t.subarray(e,e+16384));return r}if(Wt)return Wt.decode(t);var i=$t(t),o=i.s;return(r=i.r).length&&I(8),o}_e.EncodeUTF8=tn,_e.strToU8=nn,_e.strFromU8=rn;var en=function(t){return 1==t?3:t<6?2:9==t?1:0},on=function(t,n){return n+30+ht(t,n+26)+ht(t,n+28)},sn=function(t,n,r){var e=ht(t,n+28),i=rn(t.subarray(n+46,n+46+e),!(2048&ht(t,n+8))),o=n+46+e,s=ft(t,n+20),a=r&&4294967295==s?an(t,o):[s,ft(t,n+24),ft(t,n+42)],u=a[0],h=a[1],f=a[2];return[ht(t,n+10),u,h,i,o+ht(t,n+30)+ht(t,n+32),f]},an=function(t,n){for(;1!=ht(t,n);n+=4+ht(t,n+2));return[lt(t,n+12),lt(t,n+4),lt(t,n+20)]},un=function(t){var n=0;if(t)for(var r in t){var e=t[r].length;e>65535&&I(9),n+=e+4}return n},hn=function(t,n,r,e,i,o,s,a){var u=e.length,h=r.extra,f=a&&a.length,l=un(h);ct(t,n,null!=s?33639248:67324752),n+=4,null!=s&&(t[n++]=20,t[n++]=r.os),t[n]=20,n+=2,t[n++]=r.flag<<1|(o<0&&8),t[n++]=i&&8,t[n++]=255&r.compression,t[n++]=r.compression>>8;var c=new Date(null==r.mtime?Date.now():r.mtime),p=c.getFullYear()-1980;if((p<0||p>119)&&I(10),ct(t,n,p<<25|c.getMonth()+1<<21|c.getDate()<<16|c.getHours()<<11|c.getMinutes()<<5|c.getSeconds()>>1),n+=4,-1!=o&&(ct(t,n,r.crc),ct(t,n+4,o<0?-o-2:o),ct(t,n+8,r.size)),ct(t,n+12,u),ct(t,n+14,l),n+=16,null!=s&&(ct(t,n,f),ct(t,n+6,r.attrs),ct(t,n+10,s),n+=14),t.set(e,n),n+=u,l)for(var v in h){var d=h[v],g=d.length;ct(t,n,+v),ct(t,n+2,g),t.set(d,n+4),n+=4+g}return f&&(t.set(a,n),n+=f),n},fn=function(t,n,r,e,i){ct(t,n,101010256),ct(t,n+8,r),ct(t,n+10,r),ct(t,n+12,e),ct(t,n+16,i)},ln=function(){function t(t){this.filename=t,this.c=Y(),this.size=0,this.compression=0}return t.prototype.process=function(t,n){this.ondata(null,t,n)},t.prototype.push=function(t,n){this.ondata||I(5),this.c.p(t),this.size+=t.length,n&&(this.crc=this.c.d()),this.process(t,n||!1)},t}();_e.ZipPassThrough=ln;var cn=function(){function t(t,n){var r=this;n||(n={}),ln.call(this,t),this.d=new wt(n,(function(t,n){r.ondata(null,t,n)})),this.compression=8,this.flag=en(n.level)}return t.prototype.process=function(t,n){try{this.d.push(t,n)}catch(t){this.ondata(t,null,n)}},t.prototype.push=function(t,n){ln.prototype.push.call(this,t,n)},t}();_e.ZipDeflate=cn;var pn=function(){function t(t,n){var r=this;n||(n={}),ln.call(this,t),this.d=new xt(n,(function(t,n,e){r.ondata(t,n,e)})),this.compression=8,this.flag=en(n.level),this.terminate=this.d.terminate}return t.prototype.process=function(t,n){this.d.push(t,n)},t.prototype.push=function(t,n){ln.prototype.push.call(this,t,n)},t}();_e.AsyncZipDeflate=pn;var vn=function(){function t(t){this.ondata=t,this.u=[],this.d=1}return t.prototype.add=function(t){var r=this;if(this.ondata||I(5),2&this.d)this.ondata(I(4+8*(1&this.d),0,1),null,!1);else{var e=nn(t.filename),i=e.length,o=t.comment,s=o&&nn(o),a=i!=t.filename.length||s&&o.length!=s.length,u=i+un(t.extra)+30;i>65535&&this.ondata(I(11,0,1),null,!1);var h=new n(u);hn(h,0,t,e,a,-1);var f=[h],l=function(){for(var t=0,n=f;t<n.length;t++)r.ondata(null,n[t],!1);f=[]},c=this.d;this.d=0;var p=this.u.length,v=Q(t,{f:e,u:a,o:s,t:function(){t.terminate&&t.terminate()},r:function(){if(l(),c){var t=r.u[p+1];t?t.r():r.d=1}c=1}}),d=0;t.ondata=function(e,i,o){if(e)r.ondata(e,i,o),r.terminate();else if(d+=i.length,f.push(i),o){var s=new n(16);ct(s,0,134695760),ct(s,4,t.crc),ct(s,8,d),ct(s,12,t.size),f.push(s),v.c=d,v.b=u+d+16,v.crc=t.crc,v.size=t.size,c&&v.r(),c=1}else c&&l()},this.u.push(v)}},t.prototype.end=function(){var t=this;2&this.d?this.ondata(I(4+8*(1&this.d),0,1),null,!0):(this.d?this.e():this.u.push({r:function(){1&t.d&&(t.u.splice(-1,1),t.e())},t:function(){}}),this.d=3)},t.prototype.e=function(){for(var t=0,r=0,e=0,i=0,o=this.u;i<o.length;i++)e+=46+(h=o[i]).f.length+un(h.extra)+(h.o?h.o.length:0);for(var s=new n(e+22),a=0,u=this.u;a<u.length;a++){var h;hn(s,t,h=u[a],h.f,h.u,-h.c-2,r,h.o),t+=46+h.f.length+un(h.extra)+(h.o?h.o.length:0),r+=h.b}fn(s,t,this.u.length,e,r),this.ondata(null,s,!0),this.d=2},t.prototype.terminate=function(){for(var t=0,n=this.u;t<n.length;t++)n[t].t();this.d=2},t}();function dn(t,r,e){e||(e=r,r={}),"function"!=typeof e&&I(7);var i={};Rt(t,"",i,r);var o=Object.keys(i),s=o.length,a=0,u=0,h=s,f=Array(s),l=[],c=function(){for(var t=0;t<l.length;++t)l[t]()},p=function(t,n){xn((function(){e(t,n)}))};xn((function(){p=e}));var v=function(){var t=new n(u+22),r=a,e=u-a;u=0;for(var i=0;i<h;++i){var o=f[i];try{var s=o.c.length;hn(t,u,o,o.f,o.u,s);var l=30+o.f.length+un(o.extra),c=u+l;t.set(o.c,c),hn(t,a,o,o.f,o.u,s,u,o.m),a+=16+l+(o.m?o.m.length:0),u=c+s}catch(t){return p(t,null)}}fn(t,a,f.length,e,r),p(null,t)};s||v();for(var d=function(t){var n=o[t],r=i[n],e=r[0],h=r[1],d=Y(),g=e.length;d.p(e);var y=nn(n),m=y.length,b=h.comment,w=b&&nn(b),x=w&&w.length,z=un(h.extra),k=0==h.level?0:8,M=function(r,e){if(r)c(),p(r,null);else{var i=e.length;f[t]=Q(h,{size:g,crc:d.d(),c:e,f:y,m:w,u:m!=n.length||w&&b.length!=x,compression:k}),a+=30+m+z+i,u+=76+2*(m+z)+(x||0)+i,--s||v()}};if(m>65535&&M(I(11,0,1),null),k)if(g<16e4)try{M(null,kt(e,h))}catch(t){M(t,null)}else l.push(zt(e,h,M));else M(null,e)},g=0;g<h;++g)d(g);return c}function gn(t,r){r||(r={});var e={},i=[];Rt(t,"",e,r);var o=0,s=0;for(var a in e){var u=e[a],h=u[0],f=u[1],l=0==f.level?0:8,c=(M=nn(a)).length,p=f.comment,v=p&&nn(p),d=v&&v.length,g=un(f.extra);c>65535&&I(11);var y=l?kt(h,f):h,m=y.length,b=Y();b.p(h),i.push(Q(f,{size:h.length,crc:b.d(),c:y,f:M,m:v,u:c!=a.length||v&&p.length!=d,o:o,compression:l})),o+=30+c+g+m,s+=76+2*(c+g)+(d||0)+m}for(var w=new n(s+22),x=o,z=s-o,k=0;k<i.length;++k){var M;hn(w,(M=i[k]).o,M,M.f,M.u,M.c.length);var S=30+M.f.length+un(M.extra);w.set(M.c,M.o+S),hn(w,o,M,M.f,M.u,M.c.length,M.o,M.m),o+=16+S+(M.m?M.m.length:0)}return fn(w,o,i.length,z,x),w}_e.Zip=vn,_e.zip=dn,_e.zipSync=gn;var yn=function(){function t(){}return t.prototype.push=function(t,n){this.ondata(null,t,n)},t.compression=0,t}();_e.UnzipPassThrough=yn;var mn=function(){function t(){var t=this;this.i=new Mt((function(n,r){t.ondata(null,n,r)}))}return t.prototype.push=function(t,n){try{this.i.push(t,n)}catch(t){this.ondata(t,null,n)}},t.compression=8,t}();_e.UnzipInflate=mn;var bn=function(){function t(t,n){var r=this;n<32e4?this.i=new Mt((function(t,n){r.ondata(null,t,n)})):(this.i=new St((function(t,n,e){r.ondata(t,n,e)})),this.terminate=this.i.terminate)}return t.prototype.push=function(t,n){this.i.terminate&&(t=D(t,0)),this.i.push(t,n)},t.compression=8,t}();_e.AsyncUnzipInflate=bn;var wn=function(){function t(t){this.onfile=t,this.k=[],this.o={0:yn},this.p=N}return t.prototype.push=function(t,r){var e=this;if(this.onfile||I(5),this.p||I(4),this.c>0){var i=Math.min(this.c,t.length),o=t.subarray(0,i);if(this.c-=i,this.d?this.d.push(o,!this.c):this.k[0].push(o),(t=t.subarray(i)).length)return this.push(t,r)}else{var s=0,a=0,u=void 0,h=void 0;this.p.length?t.length?((h=new n(this.p.length+t.length)).set(this.p),h.set(t,this.p.length)):h=this.p:h=t;for(var f=h.length,l=this.c,c=l&&this.d,p=function(){var t,n=ft(h,a);if(67324752==n){s=1,u=a,v.d=null,v.c=0;var r=ht(h,a+6),i=ht(h,a+8),o=2048&r,c=8&r,p=ht(h,a+26),d=ht(h,a+28);if(f>a+30+p+d){var g=[];v.k.unshift(g),s=2;var y,m=ft(h,a+18),b=ft(h,a+22),w=rn(h.subarray(a+30,a+=30+p),!o);4294967295==m?(t=c?[-2]:an(h,a),m=t[0],b=t[1]):c&&(m=-1),a+=d,v.c=m;var x={name:w,compression:i,start:function(){if(x.ondata||I(5),m){var t=e.o[i];t||x.ondata(I(14,"unknown compression type "+i,1),null,!1),(y=m<0?new t(w):new t(w,m,b)).ondata=function(t,n,r){x.ondata(t,n,r)};for(var n=0,r=g;n<r.length;n++)y.push(r[n],!1);e.k[0]==g&&e.c?e.d=y:y.push(N,!0)}else x.ondata(null,N,!0)},terminate:function(){y&&y.terminate&&y.terminate()}};m>=0&&(x.size=m,x.originalSize=b),v.onfile(x)}return"break"}if(l){if(134695760==n)return u=a+=12+(-2==l&&8),s=3,v.c=0,"break";if(33639248==n)return u=a-=4,s=3,v.c=0,"break"}},v=this;a<f-4&&"break"!==p();++a);if(this.p=N,l<0){var d=h.subarray(0,s?u-12-(-2==l&&8)-(134695760==ft(h,u-16)&&4):a);c?c.push(d,!!s):this.k[+(2==s)].push(d)}if(2&s)return this.push(h.subarray(a),r);this.p=h.subarray(a)}r&&(this.c&&I(13),this.p=null)},t.prototype.register=function(t){this.o[t.compression]=t},t}();_e.Unzip=wn;var xn="function"==typeof queueMicrotask?queueMicrotask:"function"==typeof setTimeout?setTimeout:function(t){t()};function zn(t,r,e){e||(e=r,r={}),"function"!=typeof e&&I(7);var i=[],o=function(){for(var t=0;t<i.length;++t)i[t]()},s={},a=function(t,n){xn((function(){e(t,n)}))};xn((function(){a=e}));for(var u=t.length-22;101010256!=ft(t,u);--u)if(!u||t.length-u>65558)return a(I(13,0,1),null),o;var h=ht(t,u+8);if(h){var f=h,l=ft(t,u+16),c=4294967295==l||65535==f;if(c){var p=ft(t,u-12);(c=101075792==ft(t,p))&&(f=h=ft(t,p+32),l=ft(t,p+48))}for(var v=r&&r.filter,d=function(r){var e=sn(t,l,c),u=e[0],f=e[1],p=e[2],d=e[3],g=e[4],y=on(t,e[5]);l=g;var m=function(t,n){t?(o(),a(t,null)):(n&&(s[d]=n),--h||a(null,s))};if(!v||v({name:d,size:f,originalSize:p,compression:u}))if(u)if(8==u){var b=t.subarray(y,y+f);if(p<524288||f>.8*p)try{m(null,Tt(b,{out:new n(p)}))}catch(t){m(t,null)}else i.push(At(b,{size:p},m))}else m(I(14,"unknown compression type "+u,1),null);else m(null,D(t,y,y+f));else m(null,null)},g=0;g<f;++g)d()}else a(null,{});return o}function kn(t,r){for(var e={},i=t.length-22;101010256!=ft(t,i);--i)(!i||t.length-i>65558)&&I(13);var o=ht(t,i+8);if(!o)return{};var s=ft(t,i+16),a=4294967295==s||65535==o;if(a){var u=ft(t,i-12);(a=101075792==ft(t,u))&&(o=ft(t,u+32),s=ft(t,u+48))}for(var h=r&&r.filter,f=0;f<o;++f){var l=sn(t,s,a),c=l[0],p=l[1],v=l[2],d=l[3],g=l[4],y=on(t,l[5]);s=g,h&&!h({name:d,size:p,originalSize:v,compression:c})||(c?8==c?e[d]=Tt(t.subarray(y,y+p),{out:new n(v)}):I(14,"unknown compression type "+c):e[d]=D(t,y,y+p))}return e}_e.unzip=zn,_e.unzipSync=kn;return _e});</script>
+<script>
+(function () {
+  'use strict';
+
+  // ------------------------------------------------------------------ helpers
+  const $ = (s, r) => (r || document).querySelector(s);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const hexOf = (buf) => { const a = new Uint8Array(buf); let s = ''; for (let i = 0; i < a.length; i++) s += a[i].toString(16).padStart(2, '0'); return s; };
+  const digest = (algo, u8) => crypto.subtle.digest(algo, u8).then(hexOf);
+  const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'modpack';
+  const STORE_RE = /\.(jar|zip|png|jpe?g|ogg|mp3|gz|7z|rar)$/i;
+  const ROW_H = 34;
+  // Hosting this page for other people? Put your relay address here so visitors do not have to type it.
+  const DEFAULT_RELAY = '';
+  const MB = 1024 * 1024;
+
+  function fmtBytes(n) {
+    if (!isFinite(n) || n < 0) return '—';
+    const u = ['B', 'KB', 'MB', 'GB']; let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i ? n.toFixed(n >= 100 ? 0 : 1) : String(n)) + ' ' + u[i];
+  }
+  function safePath(p) {
+    if (typeof p !== 'string' || !p) return null;
+    p = p.replace(/\\/g, '/');
+    if (p.charAt(0) === '/' || /^[a-zA-Z]:/.test(p)) return null;
+    const parts = p.split('/');
+    for (const s of parts) if (s === '' || s === '.' || s === '..') return null;
+    return parts.join('/');
+  }
+  function showMsg(sel, text, kind) { const n = $(sel); n.textContent = text; if (kind) n.className = 'msg ' + kind; n.hidden = false; }
+  const hide = (sel) => { $(sel).hidden = true; };
+  function saveBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  }
+  function* batches(items, sizeOf, maxN, maxBytes) {
+    maxN = maxN || 64; maxBytes = maxBytes || 24 * MB;
+    let cur = [], bytes = 0;
+    for (const it of items) {
+      const s = sizeOf(it) || 0;
+      if (cur.length && (cur.length >= maxN || bytes + s > maxBytes)) { yield cur; cur = []; bytes = 0; }
+      cur.push(it); bytes += s;
+    }
+    if (cur.length) yield cur;
+  }
+  class Cancelled extends Error { constructor() { super('Cancelled'); this.name = 'Cancelled'; } }
+  function newCtl() {
+    const c = { aborted: false, controller: new AbortController() };
+    c.check = () => { if (c.aborted) throw new Cancelled(); };
+    c.cancel = () => { c.aborted = true; c.controller.abort(); };
+    return c;
+  }
+  async function pool(items, limit, worker, ctl) {
+    let i = 0;
+    const run = async () => {
+      while (i < items.length) { ctl.check(); const k = i++; await worker(items[k], k); }
+    };
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  }
+
+  // Progress is written at most once per frame, so thousands of updates cost almost nothing.
+  const progState = {}, progRaf = {};
+  function setProgress(k, frac, text) {
+    progState[k] = { frac, text };
+    if (progRaf[k]) return;
+    progRaf[k] = requestAnimationFrame(() => {
+      progRaf[k] = 0;
+      const p = progState[k];
+      $('#' + k + '-progress').hidden = false;
+      $('#' + k + '-fill').style.width = Math.max(0, Math.min(100, p.frac * 100)).toFixed(1) + '%';
+      if (p.text !== undefined) $('#' + k + '-status').textContent = p.text;
+    });
+  }
+
+  // Windowed list of rows.
+  class VList {
+    constructor(host) {
+      this.host = host; this.rows = []; this.raf = 0;
+      this.inner = el('div', 'vin');
+      host.appendChild(this.inner);
+      host.addEventListener('scroll', () => this.sched(), { passive: true });
+    }
+    set(rows) {
+      this.rows = rows;
+      this.host.hidden = !rows.length;
+      this.host.style.height = Math.min(340, rows.length * ROW_H + 2) + 'px';
+      this.inner.style.height = rows.length * ROW_H + 'px';
+      this.host.scrollTop = 0;
+      this.draw();
+    }
+    sched() { if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; this.draw(); }); }
+    draw() {
+      const n = this.rows.length;
+      const top = this.host.scrollTop, vh = this.host.clientHeight || 340;
+      const s = Math.max(0, Math.floor(top / ROW_H) - 6), e = Math.min(n, Math.ceil((top + vh) / ROW_H) + 6);
+      const frag = document.createDocumentFragment();
+      for (let i = s; i < e; i++) {
+        const r = this.rows[i];
+        const d = el('div', 'vrow'); d.style.top = (i * ROW_H) + 'px'; d.setAttribute('role', 'listitem');
+        const p = el('span', 'path', r.path); p.title = r.path;
+        d.appendChild(p);
+        d.appendChild(el('span', 'size', r.size || ''));
+        d.appendChild(el('span', 'pill ' + (r.state || ''), r.label || ''));
+        frag.appendChild(d);
+      }
+      this.inner.replaceChildren(frag);
+    }
+  }
+
+  // ------------------------------------------------------------------ zip engine (fflate)
+  const fflate = window.fflate;
+  let WORKERS = false;
+  try {
+    const u = URL.createObjectURL(new Blob(['self.onmessage=function(){}'], { type: 'text/javascript' }));
+    const w = new Worker(u); w.terminate(); URL.revokeObjectURL(u); WORKERS = true;
+  } catch (e) { WORKERS = false; }
+
+  function listZip(u8) {
+    const out = [];
+    fflate.unzipSync(u8, { filter: (f) => { out.push({ name: f.name, size: f.originalSize }); return false; } });
+    return out.filter((e) => !e.name.endsWith('/') && e.name.indexOf('__MACOSX/') !== 0);
+  }
+  function extract(u8, names) {
+    const want = new Set(names);
+    const opts = { filter: (f) => want.has(f.name) };
+    return new Promise((resolve, reject) => {
+      const sync = () => { try { resolve(fflate.unzipSync(u8, opts)); } catch (e) { reject(e); } };
+      if (!WORKERS) return sync();
+      fflate.unzip(u8, opts, (err, data) => (err ? sync() : resolve(data)));
+    });
+  }
+
+  // Output goes straight to disk when the browser allows it, so memory stays flat.
+  async function openSink(suggested, kind) {
+    let writable = null, error = null, pending = 0, chain = Promise.resolve();
+    const chunks = [];
+    let ended; const endedP = new Promise((r) => { ended = r; });
+    if (window.showSaveFilePicker) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: suggested,
+          types: [kind === 'mrpack'
+            ? { description: 'Modrinth modpack', accept: { 'application/zip': ['.mrpack'] } }
+            : { description: 'Zip archive', accept: { 'application/zip': ['.zip'] } }]
+        });
+        writable = await handle.createWritable();
+      } catch (e) {
+        if (e && e.name === 'AbortError') throw new Cancelled();
+        writable = null;
+      }
+    }
+    const zip = new fflate.Zip((err, chunk, final) => {
+      if (err) { error = err; ended(); return; }
+      if (writable) {
+        pending += chunk.length;
+        chain = chain.then(() => writable.write(chunk)).then(() => { pending -= chunk.length; }, (e) => { error = e; });
+      } else { chunks.push(chunk); }
+      if (final) ended();
+    });
+    return {
+      toDisk: !!writable,
+      add(path, data, store) {
+        if (error) throw error;
+        const f = (store || data.length < 128) ? new fflate.ZipPassThrough(path)
+          : (WORKERS ? new fflate.AsyncZipDeflate(path, { level: 6 }) : new fflate.ZipDeflate(path, { level: 6 }));
+        zip.add(f); f.push(data, true);
+      },
+      async drain() {
+        while (pending > 48 * MB && !error) await sleep(15);
+        if (error) throw error;
+      },
+      async finish() {
+        zip.end(); await endedP; await chain;
+        if (error) throw error;
+        if (writable) { await writable.close(); return { saved: true }; }
+        return { blob: new Blob(chunks, { type: 'application/zip' }) };
+      },
+      async abort() {
+        try { zip.terminate(); } catch (e) { /* already closed */ }
+        if (writable) { try { await writable.abort(); } catch (e) { /* ignore */ } }
+      }
+    };
+  }
+
+  // ------------------------------------------------------------------ network
+  const Net = { helper: false, base: '', viaProxy: {} };
+  async function pingBase(base) {
+    try {
+      const r = await fetch(base + '/__packshift/ping', { cache: 'no-store' });
+      return r.ok && !!(await r.json()).packshift;
+    } catch (e) { return false; }
+  }
+  async function detectHelper() {
+    Net.helper = false; Net.base = ''; Net.viaProxy = {};
+    if (/^https?:$/.test(location.protocol) && await pingBase('')) Net.helper = true;
+    else {
+      const relay = String(S.relay || DEFAULT_RELAY).trim().replace(/\/+$/, '');
+      if (/^https:\/\/[^/]+$/.test(relay) && await pingBase(relay)) { Net.helper = true; Net.base = relay; }
+    }
+    paintHelpers();
+  }
+  function helperText() {
+    if (!Net.helper) return 'No helper or relay found. CurseForge packs need one. Open Relay settings above.';
+    return Net.base ? 'Relay connected (' + new URL(Net.base).host + '). CurseForge requests and blocked downloads go through it.' : 'Local helper connected. CurseForge requests and blocked downloads go through it.';
+  }
+  function paintHelpers() {
+    document.querySelectorAll('.helper').forEach((n) => { n.className = 'helper ' + (Net.helper ? 'on' : 'off'); n.textContent = helperText(); });
+    $('#relay-badge').textContent = Net.helper ? (Net.base ? 'relay on' : 'helper on') : 'off';
+  }
+  const proxied = (url) => Net.base + '/__packshift/dl?url=' + encodeURIComponent(url);
+  const httpErr = (status) => Object.assign(new Error('HTTP ' + status), { status });
+
+  async function fetchOnce(url, signal) {
+    const host = new URL(url).host;
+    const viaProxy = Net.helper && Net.viaProxy[host];
+    let res;
+    try { res = await fetch(viaProxy ? proxied(url) : url, { signal }); }
+    catch (e) {
+      if (e.name === 'AbortError') throw e;
+      if (Net.helper && !viaProxy) { Net.viaProxy[host] = true; res = await fetch(proxied(url), { signal }); }
+      else throw e;
+    }
+    if (!res.ok) throw httpErr(res.status);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+  // Tries each url twice. verify(bytes) must throw on a bad checksum.
+  async function getBytes(urls, ctl, verify) {
+    if (!urls.length) throw new Error('no download url');
+    let last = null;
+    for (const url of urls) {
+      for (let t = 0; t < 2; t++) {
+        ctl.check();
+        try {
+          const bytes = await fetchOnce(url, ctl.controller.signal);
+          if (verify) await verify(bytes);
+          return bytes;
+        } catch (e) {
+          if (ctl.aborted) throw new Cancelled();
+          last = e;
+          if (e.status && e.status >= 400 && e.status < 500 && e.status !== 429) break;
+          await sleep(350 * (t + 1));
+        }
+      }
+    }
+    let msg = last && last.message ? last.message : 'download failed';
+    if (last instanceof TypeError) msg = Net.helper ? 'could not reach the download host' : 'blocked by the browser (this host needs the helper or a relay, see Relay settings)';
+    throw new Error(msg);
+  }
+  async function verifyHashes(u8, hashes) {
+    if (hashes.sha512) { if ((await digest('SHA-512', u8)) !== hashes.sha512.toLowerCase()) throw new Error('checksum mismatch'); }
+    else if (hashes.sha1) { if ((await digest('SHA-1', u8)) !== hashes.sha1.toLowerCase()) throw new Error('checksum mismatch'); }
+  }
+
+  const MR = 'https://api.modrinth.com/v2';
+  async function mrApi(path, opts) {
+    let res;
+    try { res = await fetch(MR + path, opts); }
+    catch (e) { throw new Error('Could not reach api.modrinth.com. Check your connection.'); }
+    if (res.status === 429) throw new Error('Modrinth rate limit reached. Wait a minute and try again.');
+    if (!res.ok) throw new Error('Modrinth answered with HTTP ' + res.status + '.');
+    return res.json();
+  }
+  const mrVersions = (hashes) => mrApi('/version_files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hashes, algorithm: 'sha512' }) });
+  async function mrProjects(ids) {
+    const out = {};
+    for (let i = 0; i < ids.length; i += 100) {
+      const arr = await mrApi('/projects?ids=' + encodeURIComponent(JSON.stringify(ids.slice(i, i + 100))));
+      arr.forEach((p) => { out[p.id] = p; });
+    }
+    return out;
+  }
+
+  // ------------------------------------------------------------------ CurseForge
+  const S = { key: '', a: { src: null, busy: false, rows: [], blob: null, outName: '' }, b: { src: null, busy: false, rows: [], blob: null, outName: '' } };
+  S.relay = '';
+  try { S.key = localStorage.getItem('packshift.cfkey') || ''; S.relay = localStorage.getItem('packshift.relay') || ''; } catch (e) { /* storage unavailable */ }
+
+  function cfBoxHtml(k) {
+    return '<h3 class="sect">CurseForge access</h3>' +
+      '<p class="muted">A CurseForge pack lists mod IDs only. Download links come from the CurseForge API, which needs a free key from console.curseforge.com.</p>' +
+      '<div class="field"><label for="' + k + '-key">CurseForge API key</label><input type="password" id="' + k + '-key" autocomplete="off" spellcheck="false"></div>' +
+      '<label class="check"><input type="checkbox" id="' + k + '-keep"> Remember the key in this browser</label>' +
+      '<div class="helper" id="' + k + '-helper"></div>';
+  }
+  ['a', 'b'].forEach((k) => {
+    const box = $('#' + k + '-cf');
+    box.innerHTML = cfBoxHtml(k);
+    const input = $('#' + k + '-key'), keep = $('#' + k + '-keep');
+    input.value = S.key; keep.checked = !!S.key;
+    const sync = () => {
+      S.key = input.value.trim();
+      try { if (keep.checked && S.key) localStorage.setItem('packshift.cfkey', S.key); else localStorage.removeItem('packshift.cfkey'); } catch (e) { /* storage unavailable */ }
+      ['a', 'b'].forEach((o) => { if (o !== k) { $('#' + o + '-key').value = input.value; $('#' + o + '-keep').checked = keep.checked; } });
+    };
+    input.addEventListener('input', sync); keep.addEventListener('change', sync);
+  });
+
+  $('#relay-url').value = S.relay;
+  $('#relay-url').addEventListener('change', () => {
+    S.relay = $('#relay-url').value.trim();
+    try { if (S.relay) localStorage.setItem('packshift.relay', S.relay); else localStorage.removeItem('packshift.relay'); } catch (e) { /* storage unavailable */ }
+    detectHelper();
+  });
+
+  async function cfApi(path, body) {
+    const key = S.key.trim();
+    if (!key) throw new Error('Enter your CurseForge API key first.');
+    if (!/^[\x21-\x7e]+$/.test(key)) throw new Error('The CurseForge API key has characters that are not allowed. Paste it again.');
+    const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+    headers[Net.helper ? 'x-cf-key' : 'x-api-key'] = key;
+    let res;
+    try { res = await fetch((Net.helper ? Net.base + '/__packshift/cf' : 'https://api.curseforge.com') + path, { method: 'POST', headers, body: JSON.stringify(body) }); }
+    catch (e) { throw new Error(Net.helper ? 'Could not reach CurseForge.' : 'The browser blocked the request to CurseForge. Run the helper or add a relay in Relay settings.'); }
+    if (res.status === 401 || res.status === 403) throw new Error('CurseForge rejected the API key.');
+    if (!res.ok) throw new Error('CurseForge answered with HTTP ' + res.status + '.');
+    return (await res.json()).data || [];
+  }
+  const CF_FOLDER = { 6: 'mods', 12: 'resourcepacks', 6552: 'shaderpacks', 6945: 'datapacks' };
+
+  async function cfResolve(manifest, ctl) {
+    const fileIds = manifest.files.map((f) => f.fileID);
+    const modIds = [...new Set(manifest.files.map((f) => f.projectID))];
+    const fileMap = new Map(), projMap = new Map();
+    for (let i = 0; i < fileIds.length; i += 100) {
+      ctl.check();
+      (await cfApi('/v1/mods/files', { fileIds: fileIds.slice(i, i + 100) })).forEach((d) => fileMap.set(d.id, d));
+    }
+    for (let i = 0; i < modIds.length; i += 100) {
+      ctl.check();
+      (await cfApi('/v1/mods', { modIds: modIds.slice(i, i + 100) })).forEach((p) => projMap.set(p.id, p));
+    }
+    return manifest.files.map((f) => {
+      const d = fileMap.get(f.fileID), p = projMap.get(f.projectID) || {};
+      const out = { projectID: f.projectID, fileID: f.fileID, name: p.name || ('Project ' + f.projectID), missing: !d, site: 'https://www.curseforge.com/projects/' + f.projectID };
+      if (!d) return out;
+      const sha1 = (d.hashes || []).find((h) => h.algo === 1);
+      const dir = Math.floor(f.fileID / 1000), rest = f.fileID % 1000;
+      out.fileName = String(d.fileName).replace(/[\\/]/g, '_');
+      out.folder = CF_FOLDER[p.classId] || 'mods';
+      out.size = d.fileLength || 0;
+      out.sha1 = sha1 ? sha1.value : '';
+      const enc = encodeURIComponent(d.fileName);
+      out.urls = [d.downloadUrl, 'https://edge.forgecdn.net/files/' + dir + '/' + rest + '/' + enc, 'https://mediafilez.forgecdn.net/files/' + dir + '/' + rest + '/' + enc].filter(Boolean);
+      out.path = out.folder + '/' + out.fileName;
+      return out;
+    });
+  }
+  async function cfDownload(item, ctl) {
+    if (item.missing) throw new Error('not found on CurseForge');
+    return getBytes(item.urls, ctl, async (u8) => {
+      if (item.sha1 && (await digest('SHA-1', u8)) !== item.sha1.toLowerCase()) throw new Error('checksum mismatch');
+    });
+  }
+  function cfLoader(manifest) {
+    const list = (manifest.minecraft && manifest.minecraft.modLoaders) || [];
+    const ml = list.find((m) => m.primary) || list[0];
+    if (!ml || !ml.id) return null;
+    const i = ml.id.indexOf('-');
+    if (i < 0) return null;
+    const map = { forge: 'forge', neoforge: 'neoforge', fabric: 'fabric-loader', quilt: 'quilt-loader' };
+    const key = map[ml.id.slice(0, i).toLowerCase()];
+    return key ? { key, version: ml.id.slice(i + 1) } : null;
+  }
+
+  // ------------------------------------------------------------------ reading a dropped file
+  async function readSource(file) {
+    let u8;
+    try { u8 = new Uint8Array(await file.arrayBuffer()); }
+    catch (e) { throw new Error('The browser could not load that file into memory. It may be too large.'); }
+    let entries;
+    try { entries = listZip(u8); } catch (e) { throw new Error('This is not a readable zip file.'); }
+    if (!entries.length) throw new Error('The zip is empty.');
+    const names = entries.map((e) => e.name);
+    const sizes = new Map(entries.map((e) => [e.name, e.size]));
+    const base = { file, u8, names, sizes };
+    const readJson = async (n) => JSON.parse(fflate.strFromU8((await extract(u8, [n]))[n]));
+    if (names.includes('modrinth.index.json')) {
+      const index = await readJson('modrinth.index.json');
+      if (!Array.isArray(index.files)) throw new Error('modrinth.index.json has no files list.');
+      return Object.assign(base, { kind: 'mrpack', index });
+    }
+    const mpath = names.includes('manifest.json') ? 'manifest.json' : names.find((n) => /^[^/]+\/manifest\.json$/.test(n));
+    if (mpath) {
+      let m = null;
+      try { m = await readJson(mpath); } catch (e) { m = null; }
+      if (m && Array.isArray(m.files) && m.minecraft) {
+        const root = mpath.slice(0, mpath.length - 'manifest.json'.length);
+        return Object.assign(base, { kind: 'cf', manifest: m, root, manifestPath: mpath });
+      }
+    }
+    return Object.assign(base, { kind: 'instance' });
+  }
+
+  function wireDrop(zone, input, onFile) {
+    ['dragenter', 'dragover'].forEach((ev) => zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach((ev) => zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.remove('over'); }));
+    zone.addEventListener('drop', (e) => { const f = e.dataTransfer && e.dataTransfer.files[0]; if (f) onFile(f); });
+    input.addEventListener('change', () => { const f = input.files[0]; input.value = ''; if (f) onFile(f); });
+  }
+
+  // ------------------------------------------------------------------ boot
+  const bootProblems = [];
+  if (!fflate) bootProblems.push('The zip engine failed to load.');
+  if (!(window.crypto && crypto.subtle)) bootProblems.push('This browser blocks hashing on this page. Use a current Chrome, Edge or Firefox, or open the page through the helper at http://localhost:8787.');
+  if (bootProblems.length) showMsg('#boot-error', bootProblems.join(' '), 'err');
+  paintHelpers();
+  detectHelper();
+
+  const modes = ['a', 'b'];
+  function setMode(m) {
+    modes.forEach((k) => { $('#tab-' + k).setAttribute('aria-selected', k === m ? 'true' : 'false'); $('#panel-' + k).hidden = k !== m; });
+  }
+  modes.forEach((k) => $('#tab-' + k).addEventListener('click', () => setMode(k)));
+
+  const lists = { a: new VList($('#a-files')), b: new VList($('#b-files')) };
+  function setBusy(k, busy) {
+    S[k].busy = busy;
+    $('#' + k + '-go').disabled = busy;
+    $('#' + k + '-cancel').hidden = !busy;
+  }
+  function finishOutput(k, out, name) {
+    const save = $('#' + k + '-save');
+    if (out.blob) {
+      S[k].blob = out.blob;
+      save.textContent = 'Save ' + name; save.hidden = false;
+      saveBlob(out.blob, name);
+    } else { S[k].blob = null; save.hidden = true; }
+  }
+  function describeError(e) { return e && e.message ? e.message : String(e); }
+
+  // ================================================================== TAB A: to .zip
+  wireDrop($('#a-drop'), $('#a-file'), async (file) => {
+    const st = S.a;
+    if (st.busy) return;
+    hide('#a-error'); hide('#a-result'); hide('#a-progress'); hide('#a-pack'); hide('#a-save'); st.blob = null;
+    let src;
+    try { src = await readSource(file); } catch (e) { return showMsg('#a-error', describeError(e), 'err'); }
+    if (src.kind === 'instance') return showMsg('#a-error', 'This zip has no modrinth.index.json or CurseForge manifest.json, so it is already a plain instance zip. Use the .zip → .mrpack tab to make an .mrpack from it.', 'err');
+    st.src = src;
+    renderA();
+  });
+
+  function selectFiles(files, target) {
+    return files.filter((f) => {
+      const env = f.env || {};
+      if (target === 'client') return env.client !== 'unsupported';
+      if (target === 'server') return env.server !== 'unsupported';
+      return true;
+    });
+  }
+  function planOverrides(names, target, roots) {
+    const order = roots || (target === 'client' ? ['overrides', 'client-overrides'] : target === 'server' ? ['overrides', 'server-overrides'] : ['overrides', 'client-overrides', 'server-overrides']);
+    const map = new Map(); let skipped = 0;
+    for (const pre of order) for (const n of names) {
+      if (n.indexOf(pre + '/') !== 0) continue;
+      const p = safePath(n.slice(pre.length + 1));
+      if (!p) { skipped++; continue; }
+      map.set(p, n);
+    }
+    return { map, skipped };
+  }
+  const cfOverrideRoot = (src) => src.root + (src.manifest.overrides || 'overrides');
+
+  function renderA() {
+    const st = S.a, src = st.src, isCf = src.kind === 'cf';
+    const meta = isCf ? src.manifest : src.index;
+    $('#a-src').textContent = isCf ? 'CurseForge pack' : 'Modrinth pack';
+    $('#a-name').textContent = meta.name || src.file.name;
+    const ver = isCf ? meta.version : meta.versionId;
+    $('#a-ver').textContent = ver ? 'v' + ver : ''; $('#a-ver').hidden = !ver;
+    $('#a-summary').textContent = (isCf ? (meta.author ? 'by ' + meta.author : '') : meta.summary) || '';
+    $('#a-summary').hidden = !$('#a-summary').textContent;
+    const deps = $('#a-deps'); deps.textContent = '';
+    const chip = (t) => deps.appendChild(el('span', 'chip', t));
+    if (isCf) {
+      chip('Minecraft ' + meta.minecraft.version);
+      ((meta.minecraft.modLoaders) || []).forEach((m) => chip(m.id));
+    } else {
+      const names = { minecraft: 'Minecraft', 'fabric-loader': 'Fabric', 'quilt-loader': 'Quilt', forge: 'Forge', neoforge: 'NeoForge' };
+      const d = meta.dependencies || {};
+      Object.keys(d).forEach((k) => chip((names[k] || k) + ' ' + d[k]));
+    }
+    $('#a-cf').hidden = !isCf;
+    if (isCf && !Net.helper) $('#relay').open = true;
+    $('#a-target-wrap').hidden = isCf;
+    $('#a-keeplabel').textContent = isCf ? 'Keep manifest.json in the zip' : 'Keep modrinth.index.json in the zip';
+    $('#a-go').textContent = 'Download mods and build zip';
+    buildRowsA();
+    $('#a-pack').hidden = false;
+  }
+  function buildRowsA() {
+    const st = S.a, src = st.src;
+    if (src.kind === 'cf') {
+      st.rows = src.manifest.files.map((f) => ({ path: 'CurseForge project ' + f.projectID + ' · file ' + f.fileID, size: '', state: '', label: 'ready', f }));
+      $('#a-nfiles').textContent = String(st.rows.length);
+      $('#a-size').textContent = '—';
+      $('#a-nover').textContent = String(planOverrides(src.names, 'all', [cfOverrideRoot(src)]).map.size);
+    } else {
+      const files = selectFiles(src.index.files, $('#a-target').value);
+      let total = 0;
+      st.rows = files.map((f) => { total += f.fileSize || 0; return { path: f.path || '(no path)', size: fmtBytes(f.fileSize || 0), state: '', label: 'ready', f }; });
+      $('#a-nfiles').textContent = String(files.length);
+      $('#a-size').textContent = fmtBytes(total);
+      $('#a-nover').textContent = String(planOverrides(src.names, $('#a-target').value).map.size);
+    }
+    lists.a.set(st.rows);
+  }
+  $('#a-target').addEventListener('change', () => {
+    if (S.a.busy || !S.a.src) return;
+    S.a.blob = null; hide('#a-save'); hide('#a-result'); hide('#a-progress');
+    buildRowsA();
+  });
+  $('#a-save').addEventListener('click', () => { if (S.a.blob) saveBlob(S.a.blob, S.a.outName); });
+  $('#a-cancel').addEventListener('click', () => { if (S.a.ctl) S.a.ctl.cancel(); });
+  $('#a-go').addEventListener('click', buildA);
+
+  async function writeOverrides(sink, src, plan, ctl, onStep) {
+    const items = [...plan.map].map(([dest, name]) => ({ dest, name }));
+    let n = 0;
+    for (const batch of batches(items, (it) => src.sizes.get(it.name))) {
+      ctl.check();
+      const data = await extract(src.u8, batch.map((b) => b.name));
+      for (const b of batch) sink.add(b.dest, data[b.name], STORE_RE.test(b.dest));
+      await sink.drain();
+      n += batch.length; onStep(n, items.length);
+    }
+    return new Set(plan.map.keys());
+  }
+
+  async function buildA() {
+    const st = S.a, src = st.src;
+    if (st.busy || !src) return;
+    const isCf = src.kind === 'cf';
+    const target = isCf ? 'all' : $('#a-target').value;
+    const meta = isCf ? src.manifest : src.index;
+    const ver = isCf ? meta.version : meta.versionId;
+    const outName = slug(meta.name || src.file.name.replace(/\.[^.]+$/, '')) + (ver ? '-' + slug(ver) : '') + (target !== 'all' ? '-' + target : '') + '.zip';
+    st.ctl = newCtl(); const ctl = st.ctl;
+    hide('#a-result'); hide('#a-save'); st.blob = null;
+    let sink = null;
+    setBusy('a', true);
+    try {
+      sink = await openSink(outName, 'zip');           // must run first: the save dialog needs the click
+      st.outName = outName;
+      const rows = st.rows, list = lists.a;
+      rows.forEach((r) => { r.state = ''; r.label = 'waiting'; }); list.sched();
+      const failed = [];
+      let skipped = 0, written;
+
+      setProgress('a', 0, 'Copying bundled files…');
+      const plan = isCf ? planOverrides(src.names, 'all', [cfOverrideRoot(src)]) : planOverrides(src.names, target);
+      skipped = plan.skipped;
+      written = await writeOverrides(sink, src, plan, ctl, (n, t) => setProgress('a', 0.08 * n / Math.max(t, 1), 'Copying bundled files… ' + n + ' of ' + t));
+
+      if (isCf) {
+        setProgress('a', 0.08, 'Asking CurseForge about ' + rows.length + ' files…');
+        const resolved = await cfResolve(src.manifest, ctl);
+        let total = 0;
+        resolved.forEach((it, i) => {
+          Object.assign(rows[i], { path: it.missing ? it.name + ' (file ' + it.fileID + ')' : it.path, size: fmtBytes(it.size || 0), it });
+          total += it.size || 0;
+        });
+        $('#a-size').textContent = fmtBytes(total);
+        list.sched();
+      }
+
+      let done = 0; const total = rows.length; let okBytes = 0;
+      const step = () => { done++; setProgress('a', 0.1 + 0.87 * done / Math.max(total, 1), 'Downloading ' + done + ' of ' + total + '… ' + fmtBytes(okBytes)); };
+      await pool(rows, 6, async (row) => {
+        const path = isCf ? (row.it && row.it.path) : safePath(row.f.path);
+        if (path && written.has(path)) { row.state = 'warn'; row.label = 'bundled'; list.sched(); step(); return; }
+        row.state = 'run'; row.label = 'loading'; list.sched();
+        try {
+          if (!path) throw new Error(isCf ? 'not found on CurseForge' : 'unsafe path in index');
+          const bytes = isCf ? await cfDownload(row.it, ctl) : await getBytes(row.f.downloads || [], ctl, (u8) => verifyHashes(u8, row.f.hashes || {}));
+          sink.add(path, bytes, STORE_RE.test(path)); written.add(path);
+          okBytes += bytes.length;
+          row.state = 'ok'; row.label = 'ok';
+          await sink.drain();
+        } catch (e) {
+          if (e instanceof Cancelled || ctl.aborted) throw new Cancelled();
+          failed.push({ path: path || row.path, reason: describeError(e), urls: isCf ? [row.it && row.it.site].filter(Boolean) : (row.f.downloads || []) });
+          row.state = 'bad'; row.label = 'failed';
+        }
+        list.sched(); step();
+      }, ctl);
+
+      if ($('#a-keepindex').checked) {
+        const p = isCf ? 'manifest.json' : 'modrinth.index.json';
+        sink.add(p, fflate.strToU8(JSON.stringify(meta, null, 2)), false);
+      }
+      if (failed.length) {
+        const lines = ['These files could not be downloaded and are missing from the zip.', ''];
+        failed.forEach((f) => lines.push(f.path + '\n  reason: ' + f.reason + '\n  where: ' + (f.urls.join(', ') || 'none') + '\n'));
+        sink.add('DOWNLOAD_FAILED.txt', fflate.strToU8(lines.join('\n')), false);
+      }
+      setProgress('a', 0.98, 'Closing the zip…');
+      const out = await sink.finish();
+      setProgress('a', 1, 'Done');
+      const okCount = total - failed.length;
+      let text = okCount + ' of ' + total + ' files downloaded' + (isCf ? '' : ' and verified') + '. ' + (out.saved ? 'Zip saved where you chose.' : 'Zip size ' + fmtBytes(out.blob.size) + '.');
+      if (skipped) text += ' ' + skipped + ' bundled file(s) with unsafe paths were skipped.';
+      if (failed.length) text += ' ' + failed.length + ' failed and are listed in DOWNLOAD_FAILED.txt inside the zip.';
+      showMsg('#a-result', text, failed.length ? 'warn' : 'ok');
+      finishOutput('a', out, outName);
+    } catch (e) {
+      if (sink) await sink.abort();
+      if (e instanceof Cancelled) { showMsg('#a-result', 'Cancelled. Nothing was saved.', 'info'); hide('#a-progress'); }
+      else showMsg('#a-result', 'The build stopped. ' + describeError(e), 'err');
+    } finally { setBusy('a', false); }
+  }
+
+  // ================================================================== TAB B: to .mrpack
+  const KNOWN_DIRS = ['mods', 'config', 'resourcepacks', 'shaderpacks', 'datapacks', 'defaultconfigs', 'kubejs', 'scripts', 'saves'];
+  const LOOKUP_RE = /^(mods|resourcepacks|shaderpacks)\/.+\.(jar|zip)$/i;
+  const EXCL_RE = /^(logs|crash-reports|screenshots|saves|backups|\.fabric|\.mixin\.out|webcache2|downloads|debug)\//;
+  const JUNK_RE = /(^|\/)(\.DS_Store|Thumbs\.db)$/;
+
+  wireDrop($('#b-drop'), $('#b-file'), async (file) => {
+    const st = S.b;
+    if (st.busy) return;
+    hide('#b-error'); hide('#b-result'); hide('#b-progress'); hide('#b-note'); hide('#b-pack'); hide('#b-save'); st.blob = null;
+    let src;
+    try { src = await readSource(file); } catch (e) { return showMsg('#b-error', describeError(e), 'err'); }
+    if (src.kind === 'mrpack') return showMsg('#b-error', 'This is already an .mrpack. Use the .mrpack → .zip tab to unpack it.', 'err');
+    st.src = src;
+    if (src.kind === 'cf') renderBcf(); else renderBinstance();
+  });
+
+  function detectRoot(names) {
+    const counts = {};
+    names.forEach((p) => {
+      const seg = p.split('/');
+      for (let i = 0; i < seg.length - 1; i++) {
+        if (KNOWN_DIRS.indexOf(seg[i]) !== -1) { const key = i ? seg.slice(0, i).join('/') + '/' : ''; counts[key] = (counts[key] || 0) + 1; break; }
+      }
+    });
+    let best = '', bn = -1;
+    Object.keys(counts).forEach((k) => { if (counts[k] > bn || (counts[k] === bn && k.length < best.length)) { best = k; bn = counts[k]; } });
+    return best;
+  }
+  function collectInstance() {
+    const src = S.b.src, skip = $('#b-skip').checked;
+    const items = []; let excluded = 0;
+    src.names.forEach((full) => {
+      if (full.indexOf(src.root) !== 0) return;
+      const rel = full.slice(src.root.length);
+      if (!rel || JUNK_RE.test(rel) || rel === 'modrinth.index.json') return;
+      if (skip && EXCL_RE.test(rel)) { excluded++; return; }
+      items.push({ full, rel, lookup: LOOKUP_RE.test(rel) });
+    });
+    return { items, excluded };
+  }
+  function countsInstance() {
+    const c = collectInstance(); let mods = 0, res = 0, other = 0;
+    c.items.forEach((it) => { if (!it.lookup) other++; else if (/^mods\//i.test(it.rel)) mods++; else res++; });
+    $('#b-nmods').textContent = String(mods); $('#b-nres').textContent = String(res); $('#b-nother').textContent = String(other);
+    return c;
+  }
+  function syncLoaderField() { $('#b-loaderver').disabled = $('#b-loader').value === 'none'; }
+  $('#b-loader').addEventListener('change', syncLoaderField);
+  $('#b-skip').addEventListener('change', () => { const s = S.b.src; if (s && s.kind === 'instance' && !S.b.busy) countsInstance(); });
+  const setIfEmpty = (sel, v) => { const n = $(sel); if (v && !n.value) n.value = v; };
+  const setLoader = (key, ver) => { if (!key) return; $('#b-loader').value = key; $('#b-loaderver').value = ver || ''; syncLoaderField(); };
+
+  async function readJsonFrom(src, path) {
+    if (!src.names.includes(path)) return null;
+    try { return JSON.parse(fflate.strFromU8((await extract(src.u8, [path]))[path])); } catch (e) { return null; }
+  }
+
+  async function renderBinstance() {
+    const src = S.b.src;
+    src.root = detectRoot(src.names);
+    $('#b-src').textContent = 'Instance zip';
+    $('#b-l1').textContent = 'Mods'; $('#b-l2').textContent = 'Packs and shaders'; $('#b-l3').textContent = 'Other files';
+    countsInstance();
+    $('#b-found').textContent = src.file.name;
+    $('#b-detail').textContent = src.root
+      ? 'Game folders found inside "' + src.root + '". That prefix is removed from every path.'
+      : (src.names.some((p) => /^(mods|config)\//.test(p)) ? 'Game folders found at the top level of the zip.' : 'No mods or config folder found, so files are packed with their paths unchanged.');
+    $('#b-cf').hidden = true; $('#b-skipwrap').hidden = false;
+    $('#b-name').value = src.file.name.replace(/\.[^.]+$/, '');
+    $('#b-version').value = '1.0.0'; $('#b-mc').value = ''; $('#b-loaderver').value = '';
+    lists.b.set([]);
+    S.b.rows = [];
+    $('#b-pack').hidden = false;
+    syncLoaderField();
+
+    // Version hints from launcher files that may sit next to the game folders.
+    const parent = src.root.replace(/[^/]*\/$/, '');
+    const notes = [];
+    const loaderMap = { 'net.fabricmc.fabric-loader': 'fabric-loader', 'org.quiltmc.quilt-loader': 'quilt-loader', 'net.minecraftforge': 'forge', 'net.neoforged': 'neoforge' };
+    const mmc = (await readJsonFrom(src, parent + 'mmc-pack.json')) || (await readJsonFrom(src, 'mmc-pack.json'));
+    const mr = await readJsonFrom(src, 'modrinth.index.json');
+    if (mmc && Array.isArray(mmc.components)) {
+      mmc.components.forEach((c) => {
+        if (c.uid === 'net.minecraft') setIfEmpty('#b-mc', c.version);
+        else if (loaderMap[c.uid]) setLoader(loaderMap[c.uid], c.version);
+      });
+      notes.push('Minecraft and loader versions were read from mmc-pack.json.');
+    }
+    if (mr && mr.dependencies) {
+      setIfEmpty('#b-mc', mr.dependencies.minecraft);
+      ['fabric-loader', 'quilt-loader', 'forge', 'neoforge'].forEach((k) => { if (mr.dependencies[k]) setLoader(k, mr.dependencies[k]); });
+      notes.push('Versions were read from the modrinth.index.json in the zip.');
+    }
+    if (!$('#b-mc').value) notes.push('Minecraft and loader versions could not be detected. Enter them below.');
+    showMsg('#b-note', notes.join(' '), 'info');
+  }
+
+  function renderBcf() {
+    const src = S.b.src, m = src.manifest;
+    $('#b-src').textContent = 'CurseForge pack';
+    $('#b-l1').textContent = 'Mods and packs'; $('#b-l2').textContent = 'Bundled config files'; $('#b-l3').textContent = 'Minecraft';
+    $('#b-nmods').textContent = String(m.files.length);
+    $('#b-nres').textContent = String(planOverrides(src.names, 'all', [cfOverrideRoot(src)]).map.size);
+    $('#b-nother').textContent = m.minecraft.version || '?';
+    $('#b-found').textContent = m.name || src.file.name;
+    $('#b-detail').textContent = (m.author ? 'by ' + m.author + '. ' : '') + 'Every mod is downloaded from CurseForge, then matched against Modrinth by checksum. Matches become Modrinth download links. Mods Modrinth does not have are bundled inside the .mrpack.';
+    $('#b-cf').hidden = false; $('#b-skipwrap').hidden = true;
+    if (!Net.helper) $('#relay').open = true;
+    $('#b-name').value = m.name || src.file.name.replace(/\.[^.]+$/, '');
+    $('#b-version').value = m.version || '1.0.0';
+    $('#b-summary').value = '';
+    $('#b-mc').value = m.minecraft.version || '';
+    const l = cfLoader(m);
+    if (l) setLoader(l.key, l.version); else { $('#b-loader').value = 'none'; $('#b-loaderver').value = ''; syncLoaderField(); }
+    showMsg('#b-note', 'Minecraft and loader versions were read from the manifest.' + (Net.helper ? '' : ' CurseForge needs the helper or a relay, see Relay settings.'), 'info');
+    lists.b.set([]); S.b.rows = [];
+    $('#b-pack').hidden = false;
+  }
+  $('#b-save').addEventListener('click', () => { if (S.b.blob) saveBlob(S.b.blob, S.b.outName); });
+  $('#b-cancel').addEventListener('click', () => { if (S.b.ctl) S.b.ctl.cancel(); });
+  $('#b-go').addEventListener('click', buildB);
+
+  // Hash a batch, ask Modrinth, link what matches and bundle the rest. Bytes are dropped afterwards.
+  async function matchBatch(batch, ctx) {
+    const hs = await Promise.all(batch.map(async (b) => Object.assign(b, { sha1: await digest('SHA-1', b.bytes), sha512: await digest('SHA-512', b.bytes) })));
+    const found = await mrVersions([...new Set(hs.map((h) => h.sha512))]);
+    for (const h of hs) {
+      const v = found[h.sha512];
+      const file = v && (v.files || []).find((f) => f.hashes && f.hashes.sha512 === h.sha512);
+      if (file && file.url) {
+        ctx.files.push({ path: h.rel, hashes: { sha1: h.sha1, sha512: h.sha512 }, downloads: [file.url], fileSize: h.bytes.length, project: v.project_id });
+        ctx.projects.add(v.project_id); ctx.linked++;
+        h.row.state = 'ok'; h.row.label = 'linked'; h.row.size = (ctx.projectNames[v.project_id] || 'Modrinth');
+      } else {
+        ctx.sink.add('overrides/' + h.rel, h.bytes, true); ctx.bundled++;
+        h.row.state = 'warn'; h.row.label = 'bundled'; h.row.size = 'bundled';
+      }
+      h.bytes = null;
+    }
+    await ctx.sink.drain();
+    lists.b.sched();
+  }
+
+  async function buildB() {
+    const st = S.b, src = st.src;
+    if (st.busy || !src) return;
+    const name = $('#b-name').value.trim(), version = $('#b-version').value.trim() || '1.0.0', summary = $('#b-summary').value.trim();
+    const mc = $('#b-mc').value.trim(), loader = $('#b-loader').value, loaderVer = $('#b-loaderver').value.trim();
+    if (!name) return showMsg('#b-result', 'Enter a pack name.', 'err');
+    if (!mc) return showMsg('#b-result', 'Enter the Minecraft version, for example 1.20.1.', 'err');
+    if (loader !== 'none' && !loaderVer) return showMsg('#b-result', 'Enter the loader version, for example 0.15.7.', 'err');
+    if (src.kind === 'cf' && !S.key.trim()) return showMsg('#b-result', 'Enter your CurseForge API key first.', 'err');
+
+    st.ctl = newCtl(); const ctl = st.ctl;
+    hide('#b-result'); hide('#b-save'); st.blob = null;
+    const outName = slug(name) + '-' + slug(version) + '.mrpack';
+    let sink = null;
+    setBusy('b', true);
+    try {
+      sink = await openSink(outName, 'mrpack');
+      st.outName = outName;
+      const list = lists.b;
+      const ctx = { sink, files: [], projects: new Set(), linked: 0, bundled: 0, projectNames: {} };
+      const failed = [];
+      let overridesCount = 0, excluded = 0;
+
+      if (src.kind === 'instance') {
+        const c = collectInstance(); excluded = c.excluded;
+        const cands = c.items.filter((it) => it.lookup), rest = c.items.filter((it) => !it.lookup);
+        st.rows = cands.map((it) => ({ path: it.rel, size: '', state: '', label: 'waiting', it }));
+        list.set(st.rows);
+        const total = cands.length + rest.length; let done = 0;
+        for (const batch of batches(st.rows, (r) => src.sizes.get(r.it.full))) {
+          ctl.check();
+          const data = await extract(src.u8, batch.map((r) => r.it.full));
+          await matchBatch(batch.map((r) => ({ rel: r.it.rel, bytes: data[r.it.full], row: r })), ctx);
+          done += batch.length; setProgress('b', 0.85 * done / Math.max(total, 1), 'Matching ' + done + ' of ' + cands.length + ' jars and packs…');
+        }
+        for (const batch of batches(rest, (it) => src.sizes.get(it.full))) {
+          ctl.check();
+          const data = await extract(src.u8, batch.map((it) => it.full));
+          for (const it of batch) sink.add('overrides/' + it.rel, data[it.full], STORE_RE.test(it.rel));
+          await sink.drain();
+          done += batch.length; overridesCount += batch.length;
+          setProgress('b', 0.85 * done / Math.max(total, 1), 'Bundling ' + done + ' of ' + total + ' files…');
+        }
+      } else {
+        const plan = planOverrides(src.names, 'all', [cfOverrideRoot(src)]);
+        // overrides keep their paths, under overrides/ in the .mrpack
+        const items = [...plan.map].map(([dest, n]) => ({ dest, n }));
+        let n = 0;
+        for (const batch of batches(items, (it) => src.sizes.get(it.n))) {
+          ctl.check();
+          const data = await extract(src.u8, batch.map((b) => b.n));
+          for (const b of batch) sink.add('overrides/' + b.dest, data[b.n], STORE_RE.test(b.dest));
+          await sink.drain(); n += batch.length; overridesCount += batch.length;
+          setProgress('b', 0.05 * n / Math.max(items.length, 1), 'Copying bundled files… ' + n + ' of ' + items.length);
+        }
+        setProgress('b', 0.05, 'Asking CurseForge about ' + src.manifest.files.length + ' files…');
+        const resolved = await cfResolve(src.manifest, ctl);
+        st.rows = resolved.map((it) => ({ path: it.missing ? it.name + ' (file ' + it.fileID + ')' : it.path, size: fmtBytes(it.size || 0), state: '', label: 'waiting', it }));
+        list.set(st.rows);
+        let done = 0;
+        for (const batch of batches(st.rows, (r) => r.it.size, 18, 40 * MB)) {
+          ctl.check();
+          const got = [];
+          await pool(batch, 6, async (row) => {
+            row.state = 'run'; row.label = 'loading'; list.sched();
+            try { got.push({ rel: row.it.path, bytes: await cfDownload(row.it, ctl), row }); }
+            catch (e) {
+              if (e instanceof Cancelled || ctl.aborted) throw new Cancelled();
+              failed.push({ path: row.path, reason: describeError(e), site: row.it.site });
+              row.state = 'bad'; row.label = 'failed'; row.size = '';
+            }
+          }, ctl);
+          if (got.length) await matchBatch(got, ctx);
+          done += batch.length; setProgress('b', 0.05 + 0.8 * done / Math.max(st.rows.length, 1), 'Downloaded and matched ' + done + ' of ' + st.rows.length + '…');
+          list.sched();
+        }
+      }
+
+      setProgress('b', 0.88, 'Reading project details…');
+      const projects = await mrProjects([...ctx.projects]);
+      const side = (s) => (s === 'required' || s === 'optional' || s === 'unsupported') ? s : 'optional';
+      const files = ctx.files.map((f) => {
+        const p = projects[f.project] || {};
+        return { path: f.path, hashes: f.hashes, env: { client: side(p.client_side), server: side(p.server_side) }, downloads: f.downloads, fileSize: f.fileSize };
+      });
+      const deps = { minecraft: mc };
+      if (loader !== 'none') deps[loader] = loaderVer;
+      const index = { formatVersion: 1, game: 'minecraft', versionId: version, name };
+      if (summary) index.summary = summary;
+      index.files = files; index.dependencies = deps;
+      sink.add('modrinth.index.json', fflate.strToU8(JSON.stringify(index, null, 2)), false);
+      if (failed.length) {
+        const lines = ['These CurseForge files could not be downloaded and are missing from the pack.', ''];
+        failed.forEach((f) => lines.push(f.path + '\n  reason: ' + f.reason + '\n  page: ' + f.site + '\n'));
+        sink.add('overrides/DOWNLOAD_FAILED.txt', fflate.strToU8(lines.join('\n')), false);
+      }
+
+      // show project names next to linked rows
+      const byPath = new Map(ctx.files.map((f) => [f.path, f]));
+      st.rows.forEach((r) => { if (r.label === 'linked') { const f = byPath.get(r.it.full ? r.it.rel : r.it.path); const p = f && projects[f.project]; if (p) r.size = p.title; } });
+      list.sched();
+
+      setProgress('b', 0.97, 'Closing the .mrpack…');
+      const out = await sink.finish();
+      setProgress('b', 1, 'Done');
+      const cands = st.rows.length;
+      let text = ctx.linked + ' of ' + cands + ' ' + (src.kind === 'cf' ? 'mods' : 'jars and packs') + ' linked to Modrinth downloads.';
+      if (ctx.bundled) text += ' ' + ctx.bundled + ' not found on Modrinth and bundled inside the pack instead.';
+      if (failed.length) text += ' ' + failed.length + ' could not be downloaded from CurseForge and are listed in overrides/DOWNLOAD_FAILED.txt.';
+      text += ' ' + overridesCount + ' other files bundled.';
+      if (excluded) text += ' ' + excluded + ' files left out.';
+      text += out.saved ? ' Pack saved where you chose.' : ' Pack size ' + fmtBytes(out.blob.size) + '.';
+      showMsg('#b-result', text, (ctx.bundled || failed.length) ? 'warn' : 'ok');
+      finishOutput('b', out, outName);
+    } catch (e) {
+      if (sink) await sink.abort();
+      if (e instanceof Cancelled) { showMsg('#b-result', 'Cancelled. Nothing was saved.', 'info'); hide('#b-progress'); }
+      else showMsg('#b-result', 'The build stopped. ' + describeError(e), 'err');
+    } finally { setBusy('b', false); }
+  }
+
+  // expose for tests
+  window.__packshift = { safePath, planOverrides, batches, cfLoader };
+})();
+</script>
+</body>
+</html>
