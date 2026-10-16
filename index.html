@@ -143,11 +143,14 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 .vlist { position: relative; overflow: auto; border: 1px solid var(--line); background: var(--panel); contain: strict; }
 .vin { position: relative; width: 100%; min-width: 0; }
 .vrow {
-  position: absolute; left: 0; right: 0; height: 34px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px;
+  position: absolute; left: 0; right: 0; height: 34px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 12px;
   align-items: center; padding: 0 12px; border-bottom: 1px solid var(--line); font-size: 0.85rem;
 }
 .vrow .path { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vrow .size { font-family: var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.8rem; white-space: nowrap; }
+.vrow .side { font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); white-space: nowrap; min-width: 4.2em; text-align: center; }
+.vrow .side.client { color: var(--accent); }
+.vrow .side.server { color: var(--ok); }
 .pill { font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 7px; border: 1px solid currentColor; color: var(--muted); white-space: nowrap; min-width: 4.5em; text-align: center; }
 .pill.run { color: var(--accent); }
 .pill.ok { color: var(--ok); }
@@ -167,7 +170,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 .toolbar .field.small { flex: 0 1 190px; }
 .count { font-family: var(--mono); font-size: 0.84rem; color: var(--muted); }
 .foot { color: var(--muted); font-size: 0.84rem; max-width: 72ch; }
-@media (max-width: 520px) { .vrow { grid-template-columns: minmax(0, 1fr) auto; } .vrow .size { display: none; } }
+@media (max-width: 520px) { .vrow { grid-template-columns: minmax(0, 1fr) auto auto; } .vrow .size { display: none; } }
 </style>
 </head>
 <body>
@@ -238,6 +241,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
           </dl>
         </div>
 
+        <div id="a-big" class="msg warn" hidden></div>
         <div id="a-note" class="msg info" hidden></div>
         <div class="cf" id="a-cf" hidden></div>
 
@@ -264,6 +268,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
           <div class="status" id="a-status" aria-live="polite"></div>
         </div>
         <div id="a-result" class="msg ok" hidden></div>
+        <div class="toolbar" id="a-sidebar" hidden>
+          <div class="field small"><label for="a-side">Show in the list</label><select id="a-side"></select></div>
+          <div class="count" id="a-sidecount" aria-live="polite"></div>
+        </div>
         <div class="vlist" id="a-files" role="list" aria-label="Files in this pack" hidden></div>
       </div>
     </section>
@@ -287,6 +295,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
             <div><dt id="b-l3">Other files</dt><dd id="b-nother">0</dd></div>
           </dl>
         </div>
+        <div id="b-big" class="msg warn" hidden></div>
         <div id="b-note" class="msg info" hidden></div>
 
         <div class="cf" id="b-cf" hidden></div>
@@ -322,6 +331,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
           <div class="status" id="b-status" aria-live="polite"></div>
         </div>
         <div id="b-result" class="msg ok" hidden></div>
+        <div class="toolbar" id="b-sidebar" hidden>
+          <div class="field small"><label for="b-side">Show in the list</label><select id="b-side"></select></div>
+          <div class="count" id="b-sidecount" aria-live="polite"></div>
+        </div>
         <div class="vlist" id="b-files" role="list" aria-label="Matched files" hidden></div>
       </div>
     </section>
@@ -362,6 +375,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
               <option value="datapack">Data packs</option>
             </select>
           </div>
+          <div class="field small"><label for="c-side">Side</label><select id="c-side"></select></div>
           <button type="button" class="btn ghost" id="c-copy">Copy list</button>
           <button type="button" class="btn ghost" id="c-csv">Save .csv</button>
         </div>
@@ -444,6 +458,17 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
   }
 
+  // Caps how many bytes are being downloaded at once, so several big files never pile up in memory together.
+  class ByteBudget {
+    constructor(max) { this.max = max; this.used = 0; this.waiting = []; }
+    async take(n) {
+      n = Math.min(Math.max(n || 0, 1), this.max);
+      while (this.used > 0 && this.used + n > this.max) await new Promise((r) => this.waiting.push(r));
+      this.used += n; return n;
+    }
+    give(n) { this.used -= n; const w = this.waiting; this.waiting = []; w.forEach((r) => r()); }
+  }
+
   // Progress is written at most once per frame, so thousands of updates cost almost nothing.
   const progState = {}, progRaf = {};
   function setProgress(k, frac, text) {
@@ -456,6 +481,30 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       $('#' + k + '-fill').style.width = Math.max(0, Math.min(100, p.frac * 100)).toFixed(1) + '%';
       if (p.text !== undefined) $('#' + k + '-status').textContent = p.text;
     });
+  }
+
+  // Which side a mod runs on: 'client' only, 'server' only, 'both', or 'unknown'.
+  const SIDE_OPTS = [['all', 'All sides'], ['client', 'Client only'], ['server', 'Server only'], ['both', 'Both sides'], ['unknown', 'Not known']];
+  const SIDE_SHORT = { client: 'client', server: 'server', both: 'both' };
+  const sideKey = (it) => (it && it.side) || 'unknown';
+  function sideFrom(c, sv) {
+    c = c || ''; sv = sv || '';
+    if (!c && !sv) return 'unknown';
+    if (c === 'unsupported' && sv === 'unsupported') return 'unknown';
+    if (c === 'unsupported') return 'server';
+    if (sv === 'unsupported') return 'client';
+    return 'both';
+  }
+  function fillSides(k, items) {
+    const sel = $('#' + k + '-side'), n = { client: 0, server: 0, both: 0, unknown: 0 };
+    items.forEach((it) => { n[sideKey(it)]++; });
+    const sig = [items.length, n.client, n.server, n.both, n.unknown].join(',');
+    if (sel.dataset.sig === sig) return;
+    sel.dataset.sig = sig;
+    const cur = sel.value || 'all';
+    sel.textContent = '';
+    SIDE_OPTS.forEach(([v, t]) => { const o = el('option', '', t + ' (' + (v === 'all' ? items.length : n[v]) + ')'); o.value = v; sel.appendChild(o); });
+    sel.value = cur;
   }
 
   // Windowed list of rows.
@@ -485,6 +534,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
         const d = el('div', 'vrow'); d.style.top = (i * ROW_H) + 'px'; d.setAttribute('role', 'listitem');
         const p = el('span', 'path', r.path); p.title = r.path;
         d.appendChild(p);
+        d.appendChild(el('span', 'side ' + (SIDE_SHORT[r.side] || ''), SIDE_SHORT[r.side] || ''));
         d.appendChild(el('span', 'size', r.size || ''));
         d.appendChild(el('span', 'pill ' + (r.state || ''), r.label || ''));
         frag.appendChild(d);
@@ -506,7 +556,84 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     fflate.unzipSync(u8, { filter: (f) => { out.push({ name: f.name, size: f.originalSize }); return false; } });
     return out.filter((e) => !e.name.endsWith('/') && e.name.indexOf('__MACOSX/') !== 0);
   }
+  // Reads a zip straight from the File in pieces, so a 1 GB pack never has to sit in memory.
+  // Only the file list at the end of the zip is read up front. Each file is read and unpacked when asked for.
+  const notZip = (m) => Object.assign(new Error(m), { notZip: true });
+  const inflateAsync = (raw) => new Promise((resolve, reject) => {
+    if (WORKERS && raw.length > 256 * 1024) fflate.inflate(raw, (err, d) => (err ? reject(err) : resolve(d)));
+    else { try { resolve(fflate.inflateSync(raw)); } catch (e) { reject(e); } }
+  });
+  class ZipFile {
+    constructor(file, map) { this.file = file; this.entries = map; }
+    static async open(file) {
+      const size = file.size;
+      if (size < 22) throw notZip('too small');
+      const tail = new Uint8Array(await file.slice(Math.max(0, size - (65535 + 22 + 20))).arrayBuffer());
+      const dv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+      let p = tail.length - 22;
+      while (p >= 0 && dv.getUint32(p, true) !== 0x06054b50) p--;
+      if (p < 0) throw notZip('no end record');
+      let total = dv.getUint16(p + 10, true), cdSize = dv.getUint32(p + 12, true), cdOff = dv.getUint32(p + 16, true);
+      if (total === 0xffff || cdSize === 0xffffffff || cdOff === 0xffffffff) {      // ZIP64: sizes live in a second record
+        const lp = p - 20;
+        if (lp < 0 || dv.getUint32(lp, true) !== 0x07064b50) throw new Error('zip64 record missing');
+        const at = Number(dv.getBigUint64(lp + 8, true));
+        const b = new DataView(await file.slice(at, at + 56).arrayBuffer());
+        if (b.getUint32(0, true) !== 0x06064b50) throw new Error('zip64 record damaged');
+        total = Number(b.getBigUint64(32, true)); cdSize = Number(b.getBigUint64(40, true)); cdOff = Number(b.getBigUint64(48, true));
+      }
+      const cd = new Uint8Array(await file.slice(cdOff, cdOff + cdSize).arrayBuffer());
+      const v = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+      const map = new Map(); let o = 0, n = 0;
+      while (o + 46 <= cd.length && v.getUint32(o, true) === 0x02014b50) {
+        const flags = v.getUint16(o + 8, true), method = v.getUint16(o + 10, true);
+        let csize = v.getUint32(o + 20, true), usize = v.getUint32(o + 24, true), off = v.getUint32(o + 42, true);
+        const nl = v.getUint16(o + 28, true), xl = v.getUint16(o + 30, true), cl = v.getUint16(o + 32, true);
+        const name = fflate.strFromU8(cd.subarray(o + 46, o + 46 + nl), !(flags & 0x800));
+        if (usize === 0xffffffff || csize === 0xffffffff || off === 0xffffffff) {
+          let x = o + 46 + nl; const xe = x + xl;
+          while (x + 4 <= xe) {
+            const id = v.getUint16(x, true), len = v.getUint16(x + 2, true);
+            if (id === 1) {
+              let q = x + 4;
+              if (usize === 0xffffffff) { usize = Number(v.getBigUint64(q, true)); q += 8; }
+              if (csize === 0xffffffff) { csize = Number(v.getBigUint64(q, true)); q += 8; }
+              if (off === 0xffffffff) off = Number(v.getBigUint64(q, true));
+              break;
+            }
+            x += 4 + len;
+          }
+        }
+        map.set(name, { name, method, csize, size: usize, offset: off, flags });
+        o += 46 + nl + xl + cl; n++;
+      }
+      if (!n || (total !== 0xffff && n !== total)) throw new Error('file list does not match');
+      return new ZipFile(file, map);
+    }
+    list() {
+      return [...this.entries.values()].filter((e) => !e.name.endsWith('/') && e.name.indexOf('__MACOSX/') !== 0).map((e) => ({ name: e.name, size: e.size }));
+    }
+    async read(names) {
+      const out = {};
+      for (let i = 0; i < names.length; i += 8) {
+        await Promise.all(names.slice(i, i + 8).map(async (n) => { const e = this.entries.get(n); if (e) out[n] = await this.one(e); }));
+      }
+      return out;
+    }
+    async one(e) {
+      if (e.flags & 1) throw new Error('"' + e.name + '" is password protected.');
+      if (!e.csize) return new Uint8Array(0);
+      const h = new DataView(await this.file.slice(e.offset, e.offset + 30).arrayBuffer());
+      if (h.byteLength < 30 || h.getUint32(0, true) !== 0x04034b50) throw new Error('"' + e.name + '" is damaged inside the zip.');
+      const start = e.offset + 30 + h.getUint16(26, true) + h.getUint16(28, true);
+      const raw = new Uint8Array(await this.file.slice(start, start + e.csize).arrayBuffer());
+      if (e.method === 0) return raw;
+      if (e.method === 8) return inflateAsync(raw);
+      throw new Error('"' + e.name + '" uses a zip compression method this page cannot read.');
+    }
+  }
   function extract(u8, names) {
+    if (u8 instanceof ZipFile) return u8.read(names);
     const want = new Set(names);
     const opts = { filter: (f) => want.has(f.name) };
     return new Promise((resolve, reject) => {
@@ -569,7 +696,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   }
 
   // ------------------------------------------------------------------ network
-  const Net = { helper: false, base: '', relayKey: false, viaProxy: {} };
+  const Net = { helper: false, base: '', relayKey: false, viaProxy: {}, onBytes: null };
   async function pingBase(base) {
     try {
       const r = await fetch(base + '/__packshift/ping', { cache: 'no-store' });
@@ -604,7 +731,26 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   const proxied = (url) => Net.base + '/__packshift/dl?url=' + encodeURIComponent(url);
   const httpErr = (status) => Object.assign(new Error('HTTP ' + status), { status });
 
-  async function fetchOnce(url, signal) {
+  // Big downloads are read as a stream into one buffer, so progress moves while a large file is still arriving.
+  async function readBody(res, track) {
+    const len = +res.headers.get('content-length') || 0;
+    if (!res.body || !res.body.getReader || len < 8 * MB) {
+      const u8 = new Uint8Array(await res.arrayBuffer());
+      track.n += u8.length; if (Net.onBytes) Net.onBytes(u8.length);
+      return u8;
+    }
+    let out = new Uint8Array(len), got = 0;
+    const reader = res.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (got + value.length > out.length) { const bigger = new Uint8Array(Math.max(out.length * 2, got + value.length)); bigger.set(out.subarray(0, got)); out = bigger; }
+      out.set(value, got); got += value.length;
+      track.n += value.length; if (Net.onBytes) Net.onBytes(value.length);
+    }
+    return got === out.length ? out : out.subarray(0, got);
+  }
+  async function fetchOnce(url, signal, track) {
     const host = new URL(url).host;
     const viaProxy = Net.helper && Net.viaProxy[host];
     let res;
@@ -615,7 +761,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       else throw e;
     }
     if (!res.ok) throw httpErr(res.status);
-    return new Uint8Array(await res.arrayBuffer());
+    return readBody(res, track);
   }
   // Tries each url twice. verify(bytes) must throw on a bad checksum.
   async function getBytes(urls, ctl, verify) {
@@ -624,11 +770,13 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     for (const url of urls) {
       for (let t = 0; t < 2; t++) {
         ctl.check();
+        const track = { n: 0 };
         try {
-          const bytes = await fetchOnce(url, ctl.controller.signal);
+          const bytes = await fetchOnce(url, ctl.controller.signal, track);
           if (verify) await verify(bytes);
           return bytes;
         } catch (e) {
+          if (track.n && Net.onBytes) Net.onBytes(-track.n);
           if (ctl.aborted) throw new Cancelled();
           last = e;
           if (e.status && e.status >= 400 && e.status < 500 && e.status !== 429) break;
@@ -725,7 +873,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       ctl.check();
       (await cfApi('/v1/mods', { modIds: modIds.slice(i, i + 100) })).forEach((p) => projMap.set(p.id, p));
     }
-    return manifest.files.map((f) => {
+    const items = manifest.files.map((f) => {
       const d = fileMap.get(f.fileID), p = projMap.get(f.projectID) || {};
       const out = { projectID: f.projectID, fileID: f.fileID, name: p.name || ('Project ' + f.projectID), missing: !d, site: 'https://www.curseforge.com/projects/' + f.projectID };
       if (!d) return out;
@@ -745,6 +893,32 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       out.kind = CF_KIND[p.classId] || 'mod';
       out.author = (p.authors && p.authors[0] && p.authors[0].name) || '';
       return out;
+    });
+    await cfSides(items, ctl);
+    return items;
+  }
+  // Modrinth knows which side most mods run on, and it can be asked by the file's sha1, which CurseForge gives for free.
+  // Files Modrinth does not know fall back to the Client and Server tags CurseForge puts on some files.
+  async function cfSides(items, ctl) {
+    const withHash = items.filter((it) => !it.missing && it.sha1);
+    try {
+      const found = {};
+      for (let i = 0; i < withHash.length; i += 200) {
+        ctl.check();
+        Object.assign(found, await mrApi('/version_files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hashes: withHash.slice(i, i + 200).map((it) => it.sha1.toLowerCase()), algorithm: 'sha1' }) }));
+      }
+      const projects = await mrProjects([...new Set(Object.keys(found).map((h) => found[h].project_id))]);
+      withHash.forEach((it) => {
+        const v = found[it.sha1.toLowerCase()], p = v && projects[v.project_id];
+        if (p) it.side = sideFrom(p.client_side, p.server_side);
+      });
+    } catch (e) { if (e instanceof Cancelled) throw e; /* Modrinth unreachable: use the tags below */ }
+    items.forEach((it) => {
+      if (it.missing) { it.side = 'unknown'; return; }
+      if (it.side && it.side !== 'unknown') return;
+      const tags = (it.gv || []).map((v) => String(v).toLowerCase());
+      const c = tags.includes('client'), sv = tags.includes('server');
+      it.side = c && !sv ? 'client' : sv && !c ? 'server' : (it.kind === 'resource pack' || it.kind === 'shader') ? 'client' : 'unknown';
     });
   }
   async function cfDownload(item, ctl) {
@@ -766,11 +940,16 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
   // ------------------------------------------------------------------ reading a dropped file
   async function readSource(file) {
-    let u8;
-    try { u8 = new Uint8Array(await file.arrayBuffer()); }
-    catch (e) { throw new Error('The browser could not load that file into memory. It may be too large.'); }
-    let entries;
-    try { entries = listZip(u8); } catch (e) { throw new Error('This is not a readable zip file.'); }
+    let u8, entries;
+    try { u8 = await ZipFile.open(file); entries = u8.list(); }
+    catch (e0) {
+      if (e0 && e0.notZip) throw new Error('This is not a readable zip file.');
+      // Unusual zip layout: fall back to loading it whole, which only works for files under about 2 GB.
+      if (file.size > 1900 * MB) throw new Error('This zip could not be read in pieces and is too big to load whole.');
+      try { u8 = new Uint8Array(await file.arrayBuffer()); }
+      catch (e) { throw new Error('The browser could not load that file into memory. It may be too large.'); }
+      try { entries = listZip(u8); } catch (e) { throw new Error('This is not a readable zip file.'); }
+    }
     if (!entries.length) throw new Error('The zip is empty.');
     const names = entries.map((e) => e.name);
     const sizes = new Map(entries.map((e) => [e.name, e.size]));
@@ -831,6 +1010,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   modes.forEach((k) => $('#tab-' + k).addEventListener('click', () => setMode(k)));
 
   const lists = { a: new VList($('#a-files')), b: new VList($('#b-files')), c: new VList($('#c-files')) };
+  ['a', 'b', 'c'].forEach((k) => fillSides(k, []));
   function setBusy(k, busy) {
     S[k].busy = busy;
     $('#' + k + '-go').disabled = busy;
@@ -858,9 +1038,15 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   }
   document.querySelectorAll('input[name="a-srctype"]').forEach((r) => r.addEventListener('change', () => setSrcA(r.value)));
 
+  function checkBig(k, bytes) {
+    const n = $('#' + k + '-big'), msgs = [];
+    if (bytes > 3.8 * 1024 * MB) msgs.push('This pack comes to about ' + fmtBytes(bytes) + '. One zip cannot go past 4 GB here, so the build may fail. Use "Build for" client or server to make it smaller.');
+    if (!window.showSaveFilePicker && bytes > 600 * MB) msgs.push('This browser cannot write the file straight to disk, so the whole result is built in memory first. For a pack this big, use Chrome or Edge on a computer.');
+    n.textContent = msgs.join(' '); n.hidden = !msgs.length;
+  }
   function resetA() {
     const st = S.a;
-    ['#a-error', '#a-result', '#a-progress', '#a-pack', '#a-save', '#a-note'].forEach(hide);
+    ['#a-error', '#a-result', '#a-progress', '#a-pack', '#a-save', '#a-note', '#a-big'].forEach(hide);
     st.blob = null; st.src = null; st.preview = null; st.resolved = null; st.rows = []; st.listShown = false;
   }
   wireDrop($('#a-drop'), $('#a-file'), async (file) => {
@@ -896,17 +1082,29 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   }
   const cfOverrideRoot = (src) => src.root + (src.manifest.overrides || 'overrides');
 
+  function paintListA() {
+    const st = S.a, v = $('#a-side').value || 'all';
+    fillSides('a', st.rows);
+    $('#a-sidebar').hidden = !st.rows.length;
+    if (st.listShown) return;
+    const shown = v === 'all' ? st.rows : st.rows.filter((r) => sideKey(r) === v);
+    lists.a.set(shown);
+    $('#a-sidecount').textContent = v === 'all' ? '' : shown.length + ' of ' + st.rows.length + ' files' + (shown.length ? '' : ' have this side.');
+  }
+  $('#a-side').addEventListener('change', paintListA);
   const cfRowPath = (it) => it.missing ? it.name + '  (file ' + it.fileID + ' unavailable)' : it.name + '  ·  ' + it.fileName;
   function applyPreviewA(res) {
     const st = S.a; let total = 0;
     st.rows.forEach((r, i) => {
       const it = res[i]; if (!it) return;
-      Object.assign(r, { path: cfRowPath(it), size: fmtBytes(it.size || 0), it });
+      Object.assign(r, { path: cfRowPath(it), size: fmtBytes(it.size || 0), side: it.side, it });
       if (it.missing) { r.state = 'bad'; r.label = 'removed'; }
       total += it.size || 0;
     });
     $('#a-size').textContent = fmtBytes(total);
-    if (st.listShown) { st.listShown = false; lists.a.set(st.rows); } else lists.a.sched();
+    checkBig('a', total + st.src.file.size);
+    st.listShown = false;
+    paintListA();
   }
   // Fallback when CurseForge cannot be reached: list the names from modlist.html, as the Inspect tab does.
   // That file has no IDs, so these rows are for reading only. The real rows return when the lookup or build runs.
@@ -979,19 +1177,22 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   function buildRowsA() {
     const st = S.a, src = st.src;
     if (src.kind === 'cf') {
-      st.rows = src.manifest.files.map((f) => ({ path: 'CurseForge project ' + f.projectID + ' · file ' + f.fileID, size: '', state: '', label: 'ready', f }));
+      st.rows = src.manifest.files.map((f) => ({ path: 'CurseForge project ' + f.projectID + ' · file ' + f.fileID, size: '', state: '', label: 'ready', side: 'unknown', f }));
       $('#a-nfiles').textContent = String(st.rows.length);
       $('#a-size').textContent = '—';
+      checkBig('a', src.file.size);
       $('#a-nover').textContent = String(planOverrides(src.names, 'all', [cfOverrideRoot(src)]).map.size);
     } else {
       const files = selectFiles(src.index.files, $('#a-target').value);
       let total = 0;
-      st.rows = files.map((f) => { total += f.fileSize || 0; return { path: f.path || '(no path)', size: fmtBytes(f.fileSize || 0), state: '', label: 'ready', f }; });
+      st.rows = files.map((f) => { total += f.fileSize || 0; const env = f.env || {}; return { path: f.path || '(no path)', size: fmtBytes(f.fileSize || 0), state: '', label: 'ready', side: sideFrom(env.client, env.server), f }; });
       $('#a-nfiles').textContent = String(files.length);
       $('#a-size').textContent = fmtBytes(total);
+      checkBig('a', total + src.file.size);
       $('#a-nover').textContent = String(planOverrides(src.names, $('#a-target').value).map.size);
     }
-    lists.a.set(st.rows);
+    st.listShown = false;
+    paintListA();
   }
   $('#a-target').addEventListener('change', () => {
     if (S.a.busy || !S.a.src) return;
@@ -1032,7 +1233,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       st.outName = outName;
       const rows = st.rows, list = lists.a;
       rows.forEach((r) => { r.state = ''; r.label = 'waiting'; });
-      if (st.listShown) { st.listShown = false; list.set(rows); } else list.sched();
+      st.listShown = false; paintListA();
       const failed = [];
       let skipped = 0, written;
 
@@ -1046,31 +1247,35 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
         const resolved = st.preview || await cfResolve(src.manifest, ctl);
         let total = 0;
         resolved.forEach((it, i) => {
-          Object.assign(rows[i], { path: cfRowPath(it), size: fmtBytes(it.size || 0), it });
+          Object.assign(rows[i], { path: cfRowPath(it), size: fmtBytes(it.size || 0), side: it.side, it });
           total += it.size || 0;
         });
         $('#a-size').textContent = fmtBytes(total);
-        list.sched();
+        paintListA();
       }
 
-      let done = 0; const total = rows.length; let okBytes = 0;
-      const step = () => { done++; setProgress('a', 0.1 + 0.87 * done / Math.max(total, 1), 'Downloading ' + done + ' of ' + total + '… ' + fmtBytes(okBytes)); };
+      let done = 0; const total = rows.length; let okBytes = 0, inflight = 0;
+      const paint = () => setProgress('a', 0.1 + 0.87 * done / Math.max(total, 1), 'Downloading ' + done + ' of ' + total + '… ' + fmtBytes(okBytes + Math.max(inflight, 0)));
+      const step = () => { done++; paint(); };
+      Net.onBytes = (d) => { inflight += d; paint(); };
+      const budget = new ByteBudget(160 * MB);
       await pool(rows, 6, async (row) => {
         const path = isCf ? (row.it && row.it.path) : safePath(row.f.path);
         if (path && written.has(path)) { row.state = 'warn'; row.label = 'bundled'; list.sched(); step(); return; }
+        const hold = await budget.take(Math.max(4 * MB, (isCf ? (row.it && row.it.size) : row.f.fileSize) || 0));
         row.state = 'run'; row.label = 'loading'; list.sched();
         try {
           if (!path) throw new Error(isCf ? 'not found on CurseForge' : 'unsafe path in index');
           const bytes = isCf ? await cfDownload(row.it, ctl) : await getBytes(row.f.downloads || [], ctl, (u8) => verifyHashes(u8, row.f.hashes || {}));
           sink.add(path, bytes, STORE_RE.test(path)); written.add(path);
-          okBytes += bytes.length;
+          okBytes += bytes.length; inflight -= bytes.length;
           row.state = 'ok'; row.label = 'ok';
           await sink.drain();
         } catch (e) {
           if (e instanceof Cancelled || ctl.aborted) throw new Cancelled();
           failed.push({ path: path || row.path, reason: describeError(e), urls: isCf ? [row.it && row.it.site].filter(Boolean) : (row.f.downloads || []) });
           row.state = 'bad'; row.label = 'failed';
-        }
+        } finally { budget.give(hold); }
         list.sched(); step();
       }, ctl);
 
@@ -1096,7 +1301,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       if (sink) await sink.abort();
       if (e instanceof Cancelled) { showMsg('#a-result', 'Cancelled. Nothing was saved.', 'info'); hide('#a-progress'); }
       else showMsg('#a-result', 'The build stopped. ' + describeError(e), 'err');
-    } finally { setBusy('a', false); }
+    } finally { Net.onBytes = null; setBusy('a', false); }
   }
 
   // ================================================================== TAB B: to .mrpack
@@ -1108,7 +1313,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   wireDrop($('#b-drop'), $('#b-file'), async (file) => {
     const st = S.b;
     if (st.busy) return;
-    hide('#b-error'); hide('#b-result'); hide('#b-progress'); hide('#b-note'); hide('#b-pack'); hide('#b-save'); st.blob = null;
+    hide('#b-error'); hide('#b-result'); hide('#b-progress'); hide('#b-note'); hide('#b-big'); hide('#b-pack'); hide('#b-save'); st.blob = null;
     let src;
     try { src = await readSource(file); } catch (e) { return showMsg('#b-error', describeError(e), 'err'); }
     if (src.kind === 'mrpack') return showMsg('#b-error', 'This is already an .mrpack. Use the .mrpack → .zip tab to unpack it.', 'err');
@@ -1146,6 +1351,15 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     $('#b-nmods').textContent = String(mods); $('#b-nres').textContent = String(res); $('#b-nother').textContent = String(other);
     return c;
   }
+  function paintListB() {
+    const st = S.b, v = $('#b-side').value || 'all';
+    fillSides('b', st.rows);
+    $('#b-sidebar').hidden = !st.rows.length;
+    const shown = v === 'all' ? st.rows : st.rows.filter((r) => sideKey(r) === v);
+    lists.b.set(shown);
+    $('#b-sidecount').textContent = v === 'all' ? '' : shown.length + ' of ' + st.rows.length + ' files' + (shown.length ? '' : ' have this side.');
+  }
+  $('#b-side').addEventListener('change', paintListB);
   function syncLoaderField() { $('#b-loaderver').disabled = $('#b-loader').value === 'none'; }
   $('#b-loader').addEventListener('change', syncLoaderField);
   $('#b-skip').addEventListener('change', () => { const s = S.b.src; if (s && s.kind === 'instance' && !S.b.busy) countsInstance(); });
@@ -1168,10 +1382,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       ? 'Game folders found inside "' + src.root + '". That prefix is removed from every path.'
       : (src.names.some((p) => /^(mods|config)\//.test(p)) ? 'Game folders found at the top level of the zip.' : 'No mods or config folder found, so files are packed with their paths unchanged.');
     $('#b-cf').hidden = true; $('#b-skipwrap').hidden = false;
+    checkBig('b', src.file.size);
     $('#b-name').value = src.file.name.replace(/\.[^.]+$/, '');
     $('#b-version').value = '1.0.0'; $('#b-mc').value = ''; $('#b-loaderver').value = '';
-    lists.b.set([]);
-    S.b.rows = [];
+    S.b.rows = []; paintListB();
     $('#b-pack').hidden = false;
     syncLoaderField();
 
@@ -1215,7 +1429,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const l = cfLoader(m);
     if (l) setLoader(l.key, l.version); else { $('#b-loader').value = 'none'; $('#b-loaderver').value = ''; syncLoaderField(); }
     showMsg('#b-note', 'Minecraft and loader versions were read from the manifest.' + (Net.helper || LEAN ? '' : ' CurseForge needs the helper or a relay, see Relay settings.'), 'info');
-    lists.b.set([]); S.b.rows = [];
+    S.b.rows = []; paintListB();
     $('#b-pack').hidden = false;
   }
   $('#b-save').addEventListener('click', () => { if (S.b.blob) saveBlob(S.b.blob, S.b.outName); });
@@ -1227,6 +1441,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const hs = await Promise.all(batch.map(async (b) => Object.assign(b, { sha1: await digest('SHA-1', b.bytes), sha512: await digest('SHA-512', b.bytes) })));
     const found = await mrVersions([...new Set(hs.map((h) => h.sha512))]);
     for (const h of hs) {
+      if (sideKey(h.row) === 'unknown') { const j = /^(resourcepacks|shaderpacks)\//i.test(h.rel) ? null : jarInfo(h.bytes); h.row.side = /^(resourcepacks|shaderpacks)\//i.test(h.rel) ? 'client' : ((j && j.side) || 'unknown'); }
       const v = found[h.sha512];
       const file = v && (v.files || []).find((f) => f.hashes && f.hashes.sha512 === h.sha512);
       if (file && file.url) {
@@ -1269,8 +1484,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       if (src.kind === 'instance') {
         const c = collectInstance(); excluded = c.excluded;
         const cands = c.items.filter((it) => it.lookup), rest = c.items.filter((it) => !it.lookup);
-        st.rows = cands.map((it) => ({ path: it.rel, size: '', state: '', label: 'waiting', it }));
-        list.set(st.rows);
+        st.rows = cands.map((it) => ({ path: it.rel, size: '', state: '', label: 'waiting', side: 'unknown', it }));
+        paintListB();
         const total = cands.length + rest.length; let done = 0;
         for (const batch of batches(st.rows, (r) => src.sizes.get(r.it.full))) {
           ctl.check();
@@ -1300,8 +1515,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
         }
         setProgress('b', 0.05, 'Asking CurseForge about ' + src.manifest.files.length + ' files…');
         const resolved = await cfResolve(src.manifest, ctl);
-        st.rows = resolved.map((it) => ({ path: it.missing ? it.name + ' (file ' + it.fileID + ')' : it.path, size: fmtBytes(it.size || 0), state: '', label: 'waiting', it }));
-        list.set(st.rows);
+        st.rows = resolved.map((it) => ({ path: it.missing ? it.name + ' (file ' + it.fileID + ')' : it.path, size: fmtBytes(it.size || 0), state: '', label: 'waiting', side: it.side, it }));
+        paintListB();
         let done = 0;
         for (const batch of batches(st.rows, (r) => r.it.size, 18, 40 * MB)) {
           ctl.check();
@@ -1342,8 +1557,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
       // show project names next to linked rows
       const byPath = new Map(ctx.files.map((f) => [f.path, f]));
-      st.rows.forEach((r) => { if (r.label === 'linked') { const f = byPath.get(r.it.full ? r.it.rel : r.it.path); const p = f && projects[f.project]; if (p) r.size = p.title; } });
-      list.sched();
+      st.rows.forEach((r) => { if (r.label === 'linked') { const f = byPath.get(r.it.full ? r.it.rel : r.it.path); const p = f && projects[f.project]; if (p) { r.size = p.title; const sd = sideFrom(p.client_side, p.server_side); if (sd !== 'unknown') r.side = sd; } } });
+      paintListB();
 
       setProgress('b', 0.97, 'Closing the .mrpack…');
       const out = await sink.finish();
@@ -1400,7 +1615,13 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const pick = (k) => { const m = new RegExp('^\\s*' + k + '\\s*=\\s*["\']([^"\']*)["\']', 'm').exec(block); return m ? m[1] : ''; };
     let version = pick('version');
     if (/^\$\{/.test(version)) version = '';
-    return { id: pick('modId'), name: pick('displayName') || pick('modId'), version };
+    const core = [];
+    t.split(/\[\[dependencies\.[^\]]*\]\]/).slice(1).forEach((b) => {
+      const id = /modId\s*=\s*["']([^"']*)["']/.exec(b), sd = /side\s*=\s*["']([^"']*)["']/i.exec(b);
+      if (id && sd && /^(minecraft|forge|neoforge)$/i.test(id[1])) core.push(sd[1].toUpperCase());
+    });
+    const side = !core.length ? 'unknown' : core.every((x) => x === 'CLIENT') ? 'client' : core.every((x) => x === 'SERVER') ? 'server' : 'both';
+    return { id: pick('modId'), name: pick('displayName') || pick('modId'), version, side };
   }
   function jarInfo(bytes) {
     let f = {};
@@ -1408,26 +1629,28 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const txt = (n) => (f[n] ? fflate.strFromU8(f[n]) : null);
     try {
       let t;
-      if ((t = txt('fabric.mod.json'))) { const j = JSON.parse(t); return { loader: 'fabric', id: j.id, name: j.name || j.id, version: j.version }; }
-      if ((t = txt('quilt.mod.json'))) { const q = JSON.parse(t).quilt_loader || {}; return { loader: 'quilt', id: q.id, name: (q.metadata && q.metadata.name) || q.id, version: q.version }; }
+      if ((t = txt('fabric.mod.json'))) { const j = JSON.parse(t); return { loader: 'fabric', id: j.id, name: j.name || j.id, version: j.version, side: j.environment === 'client' ? 'client' : j.environment === 'server' ? 'server' : 'both' }; }
+      if ((t = txt('quilt.mod.json'))) { const q = JSON.parse(t).quilt_loader || {}; const env = q.minecraft && q.minecraft.environment; return { loader: 'quilt', id: q.id, name: (q.metadata && q.metadata.name) || q.id, version: q.version, side: env === 'client' ? 'client' : env === 'dedicated_server' ? 'server' : 'both' }; }
       if ((t = txt('META-INF/neoforge.mods.toml'))) return Object.assign({ loader: 'neoforge' }, tomlMod(t));
       if ((t = txt('META-INF/mods.toml'))) return Object.assign({ loader: 'forge' }, tomlMod(t));
-      if ((t = txt('mcmod.info'))) { let j = JSON.parse(t); j = Array.isArray(j) ? j[0] : (j.modList ? j.modList[0] : j); return { loader: 'forge', id: j.modid, name: j.name || j.modid, version: j.version }; }
+      if ((t = txt('mcmod.info'))) { let j = JSON.parse(t); j = Array.isArray(j) ? j[0] : (j.modList ? j.modList[0] : j); return { loader: 'forge', id: j.modid, name: j.name || j.modid, version: j.version, side: 'unknown' }; }
     } catch (e) { return null; }
     return null;
   }
 
   function sortItems() { C.items.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })); }
-  function rowOf(it) { return { path: it.name + (it.file ? '  ·  ' + it.file : ''), size: it.version || '', state: it.flag ? 'warn' : '', label: it.flag || it.kind || 'mod' }; }
+  function rowOf(it) { return { path: it.name + (it.file ? '  ·  ' + it.file : ''), side: it.side, size: it.version || '', state: it.flag ? 'warn' : '', label: it.flag || it.kind || 'mod' }; }
   function refreshC() {
     const q = $('#c-q').value.trim().toLowerCase(), t = $('#c-type').value;
-    C.shown = C.items.filter((it) => (t === 'all' || (t === 'flag' ? !!it.flag : it.kind === t)) && (!q || (it.name + ' ' + it.file + ' ' + it.version).toLowerCase().indexOf(q) !== -1));
+    fillSides('c', C.items);
+    const sv = $('#c-side').value || 'all';
+    C.shown = C.items.filter((it) => (sv === 'all' || sideKey(it) === sv) && (t === 'all' || (t === 'flag' ? !!it.flag : it.kind === t)) && (!q || (it.name + ' ' + it.file + ' ' + it.version).toLowerCase().indexOf(q) !== -1));
     lists.c.set(C.shown.map(rowOf));
     $('#c-n1').textContent = String(C.items.length);
     $('#c-n3').textContent = String(C.items.filter((it) => it.flag).length);
     $('#c-count').textContent = C.shown.length === C.items.length ? C.items.length + ' entries' : C.shown.length + ' of ' + C.items.length + ' entries';
   }
-  ['input', 'change'].forEach((ev) => { $('#c-q').addEventListener(ev, refreshC); $('#c-type').addEventListener(ev, refreshC); });
+  ['input', 'change'].forEach((ev) => { $('#c-q').addEventListener(ev, refreshC); $('#c-type').addEventListener(ev, refreshC); $('#c-side').addEventListener(ev, refreshC); });
   function setHead(o) {
     $('#c-name').textContent = o.name || '';
     $('#c-ver').textContent = o.ver ? 'v' + o.ver : ''; $('#c-ver').hidden = !o.ver;
@@ -1489,10 +1712,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       const res = await cfResolve(m, newCtl());
       if (tok !== C.token) return;
       C.items = res.map((it) => {
-        if (it.missing) return { name: it.name, file: 'file ' + it.fileID, version: '', kind: 'mod', site: it.site, note: 'file removed or unavailable', flag: 'unavailable' };
+        if (it.missing) return { name: it.name, file: 'file ' + it.fileID, version: '', kind: 'mod', site: it.site, note: 'file removed or unavailable', flag: 'unavailable', side: 'unknown' };
         const loaders = it.gv.map((v) => v.toLowerCase()).filter((v) => LOADER_LABEL[v]);
         return {
-          name: it.name, file: it.fileName, version: it.display !== it.fileName ? it.display : '', kind: it.kind, site: it.site,
+          name: it.name, file: it.fileName, version: it.display !== it.fileName ? it.display : '', kind: it.kind, side: it.side, site: it.site,
           note: [it.release, it.date, it.author && 'by ' + it.author].filter(Boolean).join(', '),
           flag: flagFor(it.gv.filter((v) => /^\d+\.\d+/.test(v)), loaders, C.pack)
         };
@@ -1517,7 +1740,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const kindOf = (p) => /^resourcepacks\//.test(p) ? 'resource pack' : /^shaderpacks\//.test(p) ? 'shader' : /^datapacks\//.test(p) ? 'datapack' : 'mod';
     C.items = ix.files.map((f) => ({
       name: String(f.path || '').split('/').pop().replace(/\.(jar|zip)$/i, ''), file: f.path || '', version: '', kind: kindOf(String(f.path || '')),
-      site: (f.downloads || [])[0] || '', note: f.env ? 'client ' + f.env.client + ', server ' + f.env.server : '', flag: '', hash: (f.hashes || {}).sha512
+      site: (f.downloads || [])[0] || '', note: f.env ? 'client ' + f.env.client + ', server ' + f.env.server : '', flag: '', hash: (f.hashes || {}).sha512,
+      side: f.env ? sideFrom(f.env.client, f.env.server) : 'unknown'
     }));
     sortItems(); refreshC();
     $('#c-count').textContent = 'Looking up names on Modrinth…';
@@ -1532,6 +1756,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       const p = projects[v.project_id];
       if (p) { it.name = p.title; it.site = 'https://modrinth.com/project/' + (p.slug || p.id); }
       it.version = v.version_number || '';
+      if (sideKey(it) === 'unknown' && p) it.side = sideFrom(p.client_side, p.server_side);
       it.flag = flagFor(v.game_versions || [], v.loaders || [], C.pack);
     });
     sortItems(); refreshC();
@@ -1559,8 +1784,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     setHead({ name: src.file.name.replace(/\.[^.]+$/, ''), src: 'Instance zip', sub: root ? 'Game folders inside "' + root + '".' : '', chips, bundled: inRoot.length - jars.length - packs.length });
     const base = (n) => rel(n).split('/').pop();
     const jarItems = new Map();
-    C.items = packs.map((n) => ({ name: base(n).replace(/\.(jar|zip)$/i, ''), file: rel(n), version: '', kind: /^shaderpacks\//i.test(rel(n)) ? 'shader' : 'resource pack', site: '', note: '', flag: '' }));
-    jars.forEach((n) => { const it = { name: base(n).replace(/\.jar$/i, ''), file: rel(n), version: '', kind: 'mod', site: '', note: 'no mod metadata found', flag: '', loader: '' }; jarItems.set(n, it); C.items.push(it); });
+    C.items = packs.map((n) => ({ name: base(n).replace(/\.(jar|zip)$/i, ''), file: rel(n), version: '', kind: /^shaderpacks\//i.test(rel(n)) ? 'shader' : 'resource pack', site: '', note: '', flag: '', side: 'client' }));
+    jars.forEach((n) => { const it = { name: base(n).replace(/\.jar$/i, ''), file: rel(n), version: '', kind: 'mod', site: '', note: 'no mod metadata found', flag: '', loader: '', side: 'unknown' }; jarItems.set(n, it); C.items.push(it); });
     sortItems(); refreshC();
     const counts = {};
     let done = 0;
@@ -1570,7 +1795,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       for (const n of batch) {
         const info = jarInfo(data[n]), it = jarItems.get(n);
         if (info) {
-          it.name = info.name || it.name; it.version = info.version || ''; it.loader = info.loader; it.note = info.id ? 'id ' + info.id + ', ' + info.loader : info.loader;
+          it.name = info.name || it.name; it.version = info.version || ''; it.loader = info.loader; it.side = info.side || 'unknown'; it.note = info.id ? 'id ' + info.id + ', ' + info.loader : info.loader;
           counts[info.loader] = (counts[info.loader] || 0) + 1;
         }
         done++;
@@ -1594,8 +1819,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     return '"' + v.replace(/"/g, '""') + '"';
   }
   $('#c-csv').addEventListener('click', () => {
-    const head = ['name', 'file', 'version', 'type', 'note', 'link', 'flag'];
-    const lines = [head.join(',')].concat(C.shown.map((it) => [it.name, it.file, it.version, it.kind, it.note, it.site, it.flag].map(csvCell).join(',')));
+    const head = ['name', 'file', 'version', 'type', 'side', 'note', 'link', 'flag'];
+    const lines = [head.join(',')].concat(C.shown.map((it) => [it.name, it.file, it.version, it.kind, sideKey(it), it.note, it.site, it.flag].map(csvCell).join(',')));
     saveBlob(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv' }), 'modlist.csv');
   });
   $('#c-copy').addEventListener('click', async () => {
