@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Packshift</title>
+<title>Packshift: convert Minecraft modpacks</title>
+<meta name="description" content="Packshift converts Minecraft modpacks between CurseForge, Modrinth (.mrpack) and plain zips, right in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Crect x='2' y='2' width='11' height='11' fill='%23b9541f'/%3E%3Crect x='15' y='2' width='11' height='11' fill='%231a201c'/%3E%3Crect x='2' y='15' width='11' height='11' fill='%231a201c'/%3E%3Crect x='16' y='16' width='9' height='9' fill='none' stroke='%231a201c' stroke-width='2'/%3E%3C/svg%3E">
 <style>
 /* Layout: one narrow workbench column. Direction switch, drop zone, pack summary, options, live file list.
    Fonts are system fonts on purpose, so the page has no network dependencies and works fully offline. */
@@ -50,8 +52,15 @@ body {
 code, .mono { font-family: var(--mono); font-size: 0.88em; }
 .wrap { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
 
-.brand { display: flex; align-items: center; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 16px; }
 .brand h1 { margin: 0; font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+.logo { flex: none; display: block; }
+.brand-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tagline { margin: 0; font-family: var(--mono); font-size: 0.82rem; color: var(--accent); letter-spacing: 0.02em; }
+.about { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 18px 0 0; padding: 0; list-style: none; }
+.about li { border: 1px solid var(--line); background: var(--panel); padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.about b { font-family: var(--mono); font-size: 0.82rem; }
+.about span { color: var(--muted); font-size: 0.85rem; line-height: 1.4; }
 .lede { margin: 14px 0 0; color: var(--muted); max-width: 66ch; }
 .lede code { color: var(--fg); }
 
@@ -134,11 +143,14 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 .vlist { position: relative; overflow: auto; border: 1px solid var(--line); background: var(--panel); contain: strict; }
 .vin { position: relative; width: 100%; min-width: 0; }
 .vrow {
-  position: absolute; left: 0; right: 0; height: 34px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px;
+  position: absolute; left: 0; right: 0; height: 34px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 12px;
   align-items: center; padding: 0 12px; border-bottom: 1px solid var(--line); font-size: 0.85rem;
 }
 .vrow .path { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vrow .size { font-family: var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.8rem; white-space: nowrap; }
+.vrow .side { font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); white-space: nowrap; min-width: 4.2em; text-align: center; }
+.vrow .side.client { color: var(--accent); }
+.vrow .side.server { color: var(--ok); }
 .pill { font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 7px; border: 1px solid currentColor; color: var(--muted); white-space: nowrap; min-width: 4.5em; text-align: center; }
 .pill.run { color: var(--accent); }
 .pill.ok { color: var(--ok); }
@@ -157,42 +169,41 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 .toolbar .field { flex: 1 1 220px; }
 .toolbar .field.small { flex: 0 1 190px; }
 .count { font-family: var(--mono); font-size: 0.84rem; color: var(--muted); }
-.hentry { border: 1px solid var(--line); background: var(--panel); min-width: 0; }
-.hentry summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 12px 14px; cursor: pointer; }
-.hentry summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.hname { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
-.hmeta, .hwhen { color: var(--muted); font-size: 0.82rem; font-family: var(--mono); }
-.hwhen { margin-left: auto; }
-.hbody { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.hbody p { margin: 0; }
-#h-list { display: flex; flex-direction: column; gap: 10px; }
 .foot { color: var(--muted); font-size: 0.84rem; max-width: 72ch; }
-@media (max-width: 520px) { .vrow { grid-template-columns: minmax(0, 1fr) auto; } .vrow .size { display: none; } }
+@media (max-width: 520px) { .vrow { grid-template-columns: minmax(0, 1fr) auto auto; } .vrow .size { display: none; } }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div class="brand">
-      <svg width="30" height="30" viewBox="0 0 28 28" aria-hidden="true">
+      <svg class="logo" width="64" height="64" viewBox="0 0 28 28" role="img" aria-label="Packshift logo">
         <rect x="2" y="2" width="11" height="11" fill="var(--accent)"/>
         <rect x="15" y="2" width="11" height="11" fill="var(--fg)"/>
         <rect x="2" y="15" width="11" height="11" fill="var(--fg)"/>
         <rect x="16" y="16" width="9" height="9" fill="none" stroke="var(--fg)" stroke-width="2"/>
       </svg>
-      <h1>Packshift</h1>
+      <div class="brand-text">
+        <h1>Packshift</h1>
+        <p class="tagline">Move Minecraft modpacks between launchers.</p>
+      </div>
     </div>
-    <p class="lede">Turn a Modrinth <code>.mrpack</code> or a CurseForge pack into a plain <code>.zip</code> with every mod and config file inside, or package an instance <code>.zip</code> or CurseForge pack as an <code>.mrpack</code>. Files are read and built in this page. Only mod downloads and lookups go online.</p>
+    <p class="lede">Packshift converts modpacks between CurseForge, Modrinth and plain zip files. A CurseForge export only holds a manifest, a mod list and your overrides, so Packshift downloads every mod and builds a complete pack for you. Everything is read and built in this page. Only mod downloads and lookups go online.</p>
+    <ul class="about">
+      <li><b>.mrpack → .zip</b><span>Unpack a Modrinth pack with every mod and config inside.</span></li>
+      <li><b>CurseForge → .zip</b><span>Turn a manifest-only export into a full, ready-to-run zip.</span></li>
+      <li><b>.zip → .mrpack</b><span>Package an instance or CurseForge pack for Modrinth.</span></li>
+      <li><b>Inspect a pack</b><span>Look inside any pack and spot mods for the wrong version or loader.</span></li>
+    </ul>
   </header>
 
   <div id="boot-error" class="msg err" role="alert" hidden></div>
 
   <div class="modes" role="tablist" aria-label="Conversion direction">
     <button type="button" role="tab" id="tab-a" aria-selected="true" aria-controls="panel-a">.mrpack → .zip</button>
+    <button type="button" role="tab" id="tab-d" aria-selected="false" aria-controls="panel-a">CurseForge → .zip</button>
     <button type="button" role="tab" id="tab-b" aria-selected="false" aria-controls="panel-b">.zip → .mrpack</button>
-    <button type="button" role="tab" id="tab-d" aria-selected="false" aria-controls="panel-d">→ CurseForge pack</button>
     <button type="button" role="tab" id="tab-c" aria-selected="false" aria-controls="panel-c">Inspect a pack</button>
-    <button type="button" role="tab" id="tab-h" aria-selected="false" aria-controls="panel-h">History</button>
   </div>
 
   <details class="relay" id="relay">
@@ -207,6 +218,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   <main>
     <!-- to .zip -->
     <section class="panel" id="panel-a" role="tabpanel" aria-labelledby="tab-a">
+      <div class="srcpick" role="radiogroup" aria-label="Type of pack" hidden>
+        <label class="check"><input type="radio" name="a-srctype" id="a-src-mr" value="mr" checked> Modrinth pack (.mrpack)</label>
+        <label class="check"><input type="radio" name="a-srctype" id="a-src-cf" value="cf"> CurseForge pack (.zip)</label>
+      </div>
       <label class="drop" id="a-drop" for="a-file">
         <input type="file" id="a-file" accept=".mrpack,.zip">
         <strong id="a-drop-title">Drop a .mrpack here</strong>
@@ -226,6 +241,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
           </dl>
         </div>
 
+        <div id="a-big" class="msg warn" hidden></div>
         <div id="a-note" class="msg info" hidden></div>
         <div class="cf" id="a-cf" hidden></div>
 
@@ -252,6 +268,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
           <div class="status" id="a-status" aria-live="polite"></div>
         </div>
         <div id="a-result" class="msg ok" hidden></div>
+        <div class="toolbar" id="a-sidebar" hidden>
+          <div class="field small"><label for="a-side">Show in the list</label><select id="a-side"></select></div>
+          <div class="count" id="a-sidecount" aria-live="polite"></div>
+        </div>
         <div class="vlist" id="a-files" role="list" aria-label="Files in this pack" hidden></div>
       </div>
     </section>
@@ -275,6 +295,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
             <div><dt id="b-l3">Other files</dt><dd id="b-nother">0</dd></div>
           </dl>
         </div>
+        <div id="b-big" class="msg warn" hidden></div>
         <div id="b-note" class="msg info" hidden></div>
 
         <div class="cf" id="b-cf" hidden></div>
@@ -310,67 +331,14 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
           <div class="status" id="b-status" aria-live="polite"></div>
         </div>
         <div id="b-result" class="msg ok" hidden></div>
+        <div class="toolbar" id="b-sidebar" hidden>
+          <div class="field small"><label for="b-side">Show in the list</label><select id="b-side"></select></div>
+          <div class="count" id="b-sidecount" aria-live="polite"></div>
+        </div>
         <div class="vlist" id="b-files" role="list" aria-label="Matched files" hidden></div>
       </div>
     </section>
     <!-- inspect -->
-    <!-- to a CurseForge pack -->
-    <section class="panel" id="panel-d" role="tabpanel" aria-labelledby="tab-d" hidden>
-      <label class="drop" id="d-drop" for="d-file">
-        <input type="file" id="d-file" accept=".mrpack,.zip">
-        <strong>Drop a .mrpack or an instance .zip here</strong>
-        <span>to get a CurseForge pack: manifest.json, overrides and modlist.html</span>
-      </label>
-      <div id="d-error" class="msg err" role="alert" hidden></div>
-
-      <div id="d-pack" class="panel" hidden>
-        <div class="card">
-          <div class="pack-head"><h2 id="d-found"></h2><span id="d-src" class="tag src"></span></div>
-          <p class="muted" id="d-detail"></p>
-          <dl class="stats">
-            <div><dt>Mods and packs</dt><dd id="d-nmods">0</dd></div>
-            <div><dt>Other files</dt><dd id="d-nother">0</dd></div>
-            <div><dt>Minecraft</dt><dd id="d-nmc">?</dd></div>
-          </dl>
-        </div>
-        <div id="d-note" class="msg info" hidden></div>
-        <div class="cf" id="d-cf" hidden></div>
-
-        <h3 class="sect">Pack details</h3>
-        <div class="fields">
-          <div class="field"><label for="d-name">Pack name</label><input type="text" id="d-name" autocomplete="off"></div>
-          <div class="field"><label for="d-version">Pack version</label><input type="text" id="d-version" value="1.0.0" autocomplete="off"></div>
-          <div class="field wide"><label for="d-author">Author</label><input type="text" id="d-author" autocomplete="off"></div>
-          <div class="field"><label for="d-mc">Minecraft version</label><input type="text" id="d-mc" placeholder="1.20.1" autocomplete="off"></div>
-          <div class="field">
-            <label for="d-loader">Mod loader</label>
-            <select id="d-loader">
-              <option value="fabric-loader">Fabric</option>
-              <option value="quilt-loader">Quilt</option>
-              <option value="forge">Forge</option>
-              <option value="neoforge">NeoForge</option>
-              <option value="none">None (vanilla)</option>
-            </select>
-          </div>
-          <div class="field"><label for="d-loaderver">Loader version</label><input type="text" id="d-loaderver" placeholder="0.15.7" autocomplete="off"></div>
-        </div>
-        <label class="check" id="d-skipwrap"><input type="checkbox" id="d-skip" checked> Leave out logs, crash reports, screenshots, saves and caches</label>
-
-        <div class="actions">
-          <button type="button" class="btn" id="d-go">Match mods and build CurseForge pack</button>
-          <button type="button" class="btn ghost" id="d-cancel" hidden>Cancel</button>
-          <button type="button" class="btn ghost" id="d-save" hidden>Save pack</button>
-        </div>
-
-        <div class="progress" id="d-progress" hidden>
-          <div class="bar"><div class="fill" id="d-fill"></div></div>
-          <div class="status" id="d-status" aria-live="polite"></div>
-        </div>
-        <div id="d-result" class="msg ok" hidden></div>
-        <div class="vlist" id="d-files" role="list" aria-label="Mods in this pack" hidden></div>
-      </div>
-    </section>
-
     <section class="panel" id="panel-c" role="tabpanel" aria-labelledby="tab-c" hidden>
       <label class="drop" id="c-drop" for="c-file">
         <input type="file" id="c-file" accept=".zip,.mrpack">
@@ -407,28 +375,13 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
               <option value="datapack">Data packs</option>
             </select>
           </div>
+          <div class="field small"><label for="c-side">Side</label><select id="c-side"></select></div>
           <button type="button" class="btn ghost" id="c-copy">Copy list</button>
           <button type="button" class="btn ghost" id="c-csv">Save .csv</button>
         </div>
         <div class="count" id="c-count" aria-live="polite"></div>
         <div class="vlist" id="c-files" role="list" aria-label="Contents of the pack" hidden></div>
       </div>
-    </section>
-    <!-- history -->
-    <section class="panel" id="panel-h" role="tabpanel" aria-labelledby="tab-h" hidden>
-      <div class="card">
-        <div class="pack-head"><h2>History</h2><span class="tag" id="h-count">0 packs</span></div>
-        <p class="muted">The packs you opened here and the mods inside each one. It is kept in this browser on this device. Nothing is uploaded, and no one else can see it.</p>
-        <div class="field"><label for="h-q">Search packs and mods</label><input type="text" id="h-q" placeholder="Type part of a pack or mod name" autocomplete="off"></div>
-        <div class="actions">
-          <button type="button" class="btn ghost" id="h-csv">Save everything (.csv)</button>
-          <button type="button" class="btn ghost" id="h-clear">Clear history</button>
-        </div>
-      </div>
-      <div id="h-volatile" class="msg warn" hidden>This browser is not letting Packshift keep a history, so it will be gone when you close the page.</div>
-      <div id="h-empty" class="msg info">Nothing here yet. Every pack you drop on any tab is listed here with its mods.</div>
-      <div id="h-none" class="msg info" hidden>No pack or mod matches that search.</div>
-      <div id="h-list"></div>
     </section>
   </main>
 
@@ -505,6 +458,17 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
   }
 
+  // Caps how many bytes are being downloaded at once, so several big files never pile up in memory together.
+  class ByteBudget {
+    constructor(max) { this.max = max; this.used = 0; this.waiting = []; }
+    async take(n) {
+      n = Math.min(Math.max(n || 0, 1), this.max);
+      while (this.used > 0 && this.used + n > this.max) await new Promise((r) => this.waiting.push(r));
+      this.used += n; return n;
+    }
+    give(n) { this.used -= n; const w = this.waiting; this.waiting = []; w.forEach((r) => r()); }
+  }
+
   // Progress is written at most once per frame, so thousands of updates cost almost nothing.
   const progState = {}, progRaf = {};
   function setProgress(k, frac, text) {
@@ -519,10 +483,37 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     });
   }
 
+  // Which side a mod runs on: 'client' only, 'server' only, 'both', or 'unknown'.
+  const SIDE_OPTS = [['all', 'All sides'], ['client', 'Client side'], ['server', 'Server side'], ['both', 'Both sides only'], ['unknown', 'Not known']];
+  const SIDE_SHORT = { client: 'client', server: 'server', both: 'both' };
+  const sideKey = (it) => (it && it.side) || 'unknown';
+  // A mod that runs on both sides belongs under Client side and under Server side.
+  const sideMatch = (it, v) => { const k = sideKey(it); return v === 'all' || k === v || (k === 'both' && (v === 'client' || v === 'server')); };
+  function sideFrom(c, sv) {
+    c = c || ''; sv = sv || '';
+    if (!c && !sv) return 'unknown';
+    if (c === 'unsupported' && sv === 'unsupported') return 'unknown';
+    if (c === 'unsupported') return 'server';
+    if (sv === 'unsupported') return 'client';
+    return 'both';
+  }
+  function fillSides(k, items) {
+    const sel = $('#' + k + '-side'), n = { client: 0, server: 0, both: 0, unknown: 0 };
+    items.forEach((it) => { n[sideKey(it)]++; });
+    const cnt = { all: items.length, client: n.client + n.both, server: n.server + n.both, both: n.both, unknown: n.unknown };
+    const sig = [cnt.all, cnt.client, cnt.server, cnt.both, cnt.unknown].join(',');
+    if (sel.dataset.sig === sig) return;
+    sel.dataset.sig = sig;
+    const cur = sel.value || 'all';
+    sel.textContent = '';
+    SIDE_OPTS.forEach(([v, t]) => { const o = el('option', '', t + ' (' + cnt[v] + ')'); o.value = v; sel.appendChild(o); });
+    sel.value = cur;
+  }
+
   // Windowed list of rows.
   class VList {
     constructor(host) {
-      this.host = host; this.rows = []; this.raf = 0;
+      this.host = host; this.rows = []; this.raf = 0; this.sideView = '';
       this.inner = el('div', 'vin');
       host.appendChild(this.inner);
       host.addEventListener('scroll', () => this.sched(), { passive: true });
@@ -543,11 +534,13 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       const frag = document.createDocumentFragment();
       for (let i = s; i < e; i++) {
         const r = this.rows[i];
+        const sd = r.side === 'both' && (this.sideView === 'client' || this.sideView === 'server') ? this.sideView : r.side;   // a both-side mod reads as the side being viewed
         const d = el('div', 'vrow'); d.style.top = (i * ROW_H) + 'px'; d.setAttribute('role', 'listitem');
         const p = el('span', 'path', r.path); p.title = r.path;
         d.appendChild(p);
+        d.appendChild(el('span', 'side ' + (SIDE_SHORT[sd] || ''), SIDE_SHORT[sd] || ''));
         d.appendChild(el('span', 'size', r.size || ''));
-        d.appendChild(r.label ? el('span', 'pill ' + (r.state || ''), r.label) : el('span'));
+        d.appendChild(el('span', 'pill ' + (r.state || ''), r.label || ''));
         frag.appendChild(d);
       }
       this.inner.replaceChildren(frag);
@@ -567,7 +560,84 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     fflate.unzipSync(u8, { filter: (f) => { out.push({ name: f.name, size: f.originalSize }); return false; } });
     return out.filter((e) => !e.name.endsWith('/') && e.name.indexOf('__MACOSX/') !== 0);
   }
+  // Reads a zip straight from the File in pieces, so a 1 GB pack never has to sit in memory.
+  // Only the file list at the end of the zip is read up front. Each file is read and unpacked when asked for.
+  const notZip = (m) => Object.assign(new Error(m), { notZip: true });
+  const inflateAsync = (raw) => new Promise((resolve, reject) => {
+    if (WORKERS && raw.length > 256 * 1024) fflate.inflate(raw, (err, d) => (err ? reject(err) : resolve(d)));
+    else { try { resolve(fflate.inflateSync(raw)); } catch (e) { reject(e); } }
+  });
+  class ZipFile {
+    constructor(file, map) { this.file = file; this.entries = map; }
+    static async open(file) {
+      const size = file.size;
+      if (size < 22) throw notZip('too small');
+      const tail = new Uint8Array(await file.slice(Math.max(0, size - (65535 + 22 + 20))).arrayBuffer());
+      const dv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+      let p = tail.length - 22;
+      while (p >= 0 && dv.getUint32(p, true) !== 0x06054b50) p--;
+      if (p < 0) throw notZip('no end record');
+      let total = dv.getUint16(p + 10, true), cdSize = dv.getUint32(p + 12, true), cdOff = dv.getUint32(p + 16, true);
+      if (total === 0xffff || cdSize === 0xffffffff || cdOff === 0xffffffff) {      // ZIP64: sizes live in a second record
+        const lp = p - 20;
+        if (lp < 0 || dv.getUint32(lp, true) !== 0x07064b50) throw new Error('zip64 record missing');
+        const at = Number(dv.getBigUint64(lp + 8, true));
+        const b = new DataView(await file.slice(at, at + 56).arrayBuffer());
+        if (b.getUint32(0, true) !== 0x06064b50) throw new Error('zip64 record damaged');
+        total = Number(b.getBigUint64(32, true)); cdSize = Number(b.getBigUint64(40, true)); cdOff = Number(b.getBigUint64(48, true));
+      }
+      const cd = new Uint8Array(await file.slice(cdOff, cdOff + cdSize).arrayBuffer());
+      const v = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+      const map = new Map(); let o = 0, n = 0;
+      while (o + 46 <= cd.length && v.getUint32(o, true) === 0x02014b50) {
+        const flags = v.getUint16(o + 8, true), method = v.getUint16(o + 10, true);
+        let csize = v.getUint32(o + 20, true), usize = v.getUint32(o + 24, true), off = v.getUint32(o + 42, true);
+        const nl = v.getUint16(o + 28, true), xl = v.getUint16(o + 30, true), cl = v.getUint16(o + 32, true);
+        const name = fflate.strFromU8(cd.subarray(o + 46, o + 46 + nl), !(flags & 0x800));
+        if (usize === 0xffffffff || csize === 0xffffffff || off === 0xffffffff) {
+          let x = o + 46 + nl; const xe = x + xl;
+          while (x + 4 <= xe) {
+            const id = v.getUint16(x, true), len = v.getUint16(x + 2, true);
+            if (id === 1) {
+              let q = x + 4;
+              if (usize === 0xffffffff) { usize = Number(v.getBigUint64(q, true)); q += 8; }
+              if (csize === 0xffffffff) { csize = Number(v.getBigUint64(q, true)); q += 8; }
+              if (off === 0xffffffff) off = Number(v.getBigUint64(q, true));
+              break;
+            }
+            x += 4 + len;
+          }
+        }
+        map.set(name, { name, method, csize, size: usize, offset: off, flags });
+        o += 46 + nl + xl + cl; n++;
+      }
+      if (!n || (total !== 0xffff && n !== total)) throw new Error('file list does not match');
+      return new ZipFile(file, map);
+    }
+    list() {
+      return [...this.entries.values()].filter((e) => !e.name.endsWith('/') && e.name.indexOf('__MACOSX/') !== 0).map((e) => ({ name: e.name, size: e.size }));
+    }
+    async read(names) {
+      const out = {};
+      for (let i = 0; i < names.length; i += 8) {
+        await Promise.all(names.slice(i, i + 8).map(async (n) => { const e = this.entries.get(n); if (e) out[n] = await this.one(e); }));
+      }
+      return out;
+    }
+    async one(e) {
+      if (e.flags & 1) throw new Error('"' + e.name + '" is password protected.');
+      if (!e.csize) return new Uint8Array(0);
+      const h = new DataView(await this.file.slice(e.offset, e.offset + 30).arrayBuffer());
+      if (h.byteLength < 30 || h.getUint32(0, true) !== 0x04034b50) throw new Error('"' + e.name + '" is damaged inside the zip.');
+      const start = e.offset + 30 + h.getUint16(26, true) + h.getUint16(28, true);
+      const raw = new Uint8Array(await this.file.slice(start, start + e.csize).arrayBuffer());
+      if (e.method === 0) return raw;
+      if (e.method === 8) return inflateAsync(raw);
+      throw new Error('"' + e.name + '" uses a zip compression method this page cannot read.');
+    }
+  }
   function extract(u8, names) {
+    if (u8 instanceof ZipFile) return u8.read(names);
     const want = new Set(names);
     const opts = { filter: (f) => want.has(f.name) };
     return new Promise((resolve, reject) => {
@@ -630,7 +700,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   }
 
   // ------------------------------------------------------------------ network
-  const Net = { helper: false, base: '', relayKey: false, viaProxy: {} };
+  const Net = { helper: false, base: '', relayKey: false, viaProxy: {}, onBytes: null };
   async function pingBase(base) {
     try {
       const r = await fetch(base + '/__packshift/ping', { cache: 'no-store' });
@@ -650,6 +720,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     // These hosts never allow direct downloads from a web page, so skip the attempt that is certain to fail.
     if (Net.helper) ['edge.forgecdn.net', 'mediafilez.forgecdn.net', 'media.forgecdn.net', 'github.com'].forEach((h) => { Net.viaProxy[h] = true; });
     paintHelpers();
+    previewNamesA();
   }
   function helperText() {
     if (!Net.helper) return 'No helper or relay found. CurseForge packs need one. Open Relay settings above.';
@@ -664,7 +735,26 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   const proxied = (url) => Net.base + '/__packshift/dl?url=' + encodeURIComponent(url);
   const httpErr = (status) => Object.assign(new Error('HTTP ' + status), { status });
 
-  async function fetchOnce(url, signal) {
+  // Big downloads are read as a stream into one buffer, so progress moves while a large file is still arriving.
+  async function readBody(res, track) {
+    const len = +res.headers.get('content-length') || 0;
+    if (!res.body || !res.body.getReader || len < 8 * MB) {
+      const u8 = new Uint8Array(await res.arrayBuffer());
+      track.n += u8.length; if (Net.onBytes) Net.onBytes(u8.length);
+      return u8;
+    }
+    let out = new Uint8Array(len), got = 0;
+    const reader = res.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (got + value.length > out.length) { const bigger = new Uint8Array(Math.max(out.length * 2, got + value.length)); bigger.set(out.subarray(0, got)); out = bigger; }
+      out.set(value, got); got += value.length;
+      track.n += value.length; if (Net.onBytes) Net.onBytes(value.length);
+    }
+    return got === out.length ? out : out.subarray(0, got);
+  }
+  async function fetchOnce(url, signal, track) {
     const host = new URL(url).host;
     const viaProxy = Net.helper && Net.viaProxy[host];
     let res;
@@ -675,7 +765,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       else throw e;
     }
     if (!res.ok) throw httpErr(res.status);
-    return new Uint8Array(await res.arrayBuffer());
+    return readBody(res, track);
   }
   // Tries each url twice. verify(bytes) must throw on a bad checksum.
   async function getBytes(urls, ctl, verify) {
@@ -684,11 +774,13 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     for (const url of urls) {
       for (let t = 0; t < 2; t++) {
         ctl.check();
+        const track = { n: 0 };
         try {
-          const bytes = await fetchOnce(url, ctl.controller.signal);
+          const bytes = await fetchOnce(url, ctl.controller.signal, track);
           if (verify) await verify(bytes);
           return bytes;
         } catch (e) {
+          if (track.n && Net.onBytes) Net.onBytes(-track.n);
           if (ctl.aborted) throw new Cancelled();
           last = e;
           if (e.status && e.status >= 400 && e.status < 500 && e.status !== 429) break;
@@ -725,7 +817,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   }
 
   // ------------------------------------------------------------------ CurseForge
-  const S = { key: '', a: { src: null, busy: false, rows: [], blob: null, outName: '' }, b: { src: null, busy: false, rows: [], blob: null, outName: '' }, d: { src: null, busy: false, rows: [], blob: null, outName: '' } };
+  const S = { key: '', a: { src: null, busy: false, rows: [], blob: null, outName: '' }, b: { src: null, busy: false, rows: [], blob: null, outName: '' } };
   S.relay = '';
   try { S.key = localStorage.getItem('packshift.cfkey') || ''; S.relay = localStorage.getItem('packshift.relay') || ''; } catch (e) { /* storage unavailable */ }
 
@@ -736,7 +828,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       '<label class="check"><input type="checkbox" id="' + k + '-keep"> Remember the key in this browser</label>' +
       '<div class="helper" id="' + k + '-helper"></div>';
   }
-  ['a', 'b', 'c', 'd'].forEach((k) => {
+  ['a', 'b', 'c'].forEach((k) => {
     const box = $('#' + k + '-cf');
     box.innerHTML = cfBoxHtml(k);
     const input = $('#' + k + '-key'), keep = $('#' + k + '-keep');
@@ -744,9 +836,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const sync = () => {
       S.key = input.value.trim();
       try { if (keep.checked && S.key) localStorage.setItem('packshift.cfkey', S.key); else localStorage.removeItem('packshift.cfkey'); } catch (e) { /* storage unavailable */ }
-      ['a', 'b', 'c', 'd'].forEach((o) => { if (o !== k) { $('#' + o + '-key').value = input.value; $('#' + o + '-keep').checked = keep.checked; } });
+      ['a', 'b', 'c'].forEach((o) => { if (o !== k) { $('#' + o + '-key').value = input.value; $('#' + o + '-keep').checked = keep.checked; } });
     };
     input.addEventListener('input', sync); keep.addEventListener('change', sync);
+    input.addEventListener('change', () => previewNamesA());
   });
 
   $('#relay-url').value = S.relay;
@@ -784,7 +877,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       ctl.check();
       (await cfApi('/v1/mods', { modIds: modIds.slice(i, i + 100) })).forEach((p) => projMap.set(p.id, p));
     }
-    return manifest.files.map((f) => {
+    const items = manifest.files.map((f) => {
       const d = fileMap.get(f.fileID), p = projMap.get(f.projectID) || {};
       const out = { projectID: f.projectID, fileID: f.fileID, name: p.name || ('Project ' + f.projectID), missing: !d, site: 'https://www.curseforge.com/projects/' + f.projectID };
       if (!d) return out;
@@ -804,6 +897,32 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       out.kind = CF_KIND[p.classId] || 'mod';
       out.author = (p.authors && p.authors[0] && p.authors[0].name) || '';
       return out;
+    });
+    await cfSides(items, ctl);
+    return items;
+  }
+  // Modrinth knows which side most mods run on, and it can be asked by the file's sha1, which CurseForge gives for free.
+  // Files Modrinth does not know fall back to the Client and Server tags CurseForge puts on some files.
+  async function cfSides(items, ctl) {
+    const withHash = items.filter((it) => !it.missing && it.sha1);
+    try {
+      const found = {};
+      for (let i = 0; i < withHash.length; i += 200) {
+        ctl.check();
+        Object.assign(found, await mrApi('/version_files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hashes: withHash.slice(i, i + 200).map((it) => it.sha1.toLowerCase()), algorithm: 'sha1' }) }));
+      }
+      const projects = await mrProjects([...new Set(Object.keys(found).map((h) => found[h].project_id))]);
+      withHash.forEach((it) => {
+        const v = found[it.sha1.toLowerCase()], p = v && projects[v.project_id];
+        if (p) it.side = sideFrom(p.client_side, p.server_side);
+      });
+    } catch (e) { if (e instanceof Cancelled) throw e; /* Modrinth unreachable: use the tags below */ }
+    items.forEach((it) => {
+      if (it.missing) { it.side = 'unknown'; return; }
+      if (it.side && it.side !== 'unknown') return;
+      const tags = (it.gv || []).map((v) => String(v).toLowerCase());
+      const c = tags.includes('client'), sv = tags.includes('server');
+      it.side = c && !sv ? 'client' : sv && !c ? 'server' : (it.kind === 'resource pack' || it.kind === 'shader') ? 'client' : 'unknown';
     });
   }
   async function cfDownload(item, ctl) {
@@ -825,16 +944,16 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
   // ------------------------------------------------------------------ reading a dropped file
   async function readSource(file) {
-    const src = await readSourceRaw(file);
-    try { histTouch(src); } catch (e) { /* history is a convenience, never a reason to fail */ }
-    return src;
-  }
-  async function readSourceRaw(file) {
-    let u8;
-    try { u8 = new Uint8Array(await file.arrayBuffer()); }
-    catch (e) { throw new Error('The browser could not load that file into memory. It may be too large.'); }
-    let entries;
-    try { entries = listZip(u8); } catch (e) { throw new Error('This is not a readable zip file.'); }
+    let u8, entries;
+    try { u8 = await ZipFile.open(file); entries = u8.list(); }
+    catch (e0) {
+      if (e0 && e0.notZip) throw new Error('This is not a readable zip file.');
+      // Unusual zip layout: fall back to loading it whole, which only works for files under about 2 GB.
+      if (file.size > 1900 * MB) throw new Error('This zip could not be read in pieces and is too big to load whole.');
+      try { u8 = new Uint8Array(await file.arrayBuffer()); }
+      catch (e) { throw new Error('The browser could not load that file into memory. It may be too large.'); }
+      try { entries = listZip(u8); } catch (e) { throw new Error('This is not a readable zip file.'); }
+    }
     if (!entries.length) throw new Error('The zip is empty.');
     const names = entries.map((e) => e.name);
     const sizes = new Map(entries.map((e) => [e.name, e.size]));
@@ -870,16 +989,32 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   if (!(window.crypto && crypto.subtle)) bootProblems.push('This browser blocks hashing on this page. Use a current Chrome, Edge or Firefox, or open the page through the helper at http://localhost:8787.');
   if (bootProblems.length) showMsg('#boot-error', bootProblems.join(' '), 'err');
   paintHelpers();
-  const helperReady = detectHelper();
+  detectHelper();
 
-  const modes = ['a', 'b', 'c', 'd', 'h'];
+  const modes = ['a', 'd', 'b', 'c'];      // tabs a and d share one panel: a = Modrinth source, d = CurseForge source
+  let curMode = 'a';
+  function paintMode(m) {
+    curMode = m;
+    modes.forEach((k) => $('#tab-' + k).setAttribute('aria-selected', k === m ? 'true' : 'false'));
+    const panel = m === 'd' ? 'a' : m;
+    ['a', 'b', 'c'].forEach((k) => { $('#panel-' + k).hidden = k !== panel; });
+  }
   function setMode(m) {
-    modes.forEach((k) => { $('#tab-' + k).setAttribute('aria-selected', k === m ? 'true' : 'false'); $('#panel-' + k).hidden = k !== m; });
-    if (m === 'h') renderHist();
+    if (m === 'a' || m === 'd') {
+      const want = m === 'd' ? 'cf' : 'mr';
+      const st = S.a;
+      if (st.src && (st.src.kind === 'cf' ? 'cf' : 'mr') !== want) {
+        if (st.busy) return;                       // do not swap a pack out from under a running build
+        resetA();
+      }
+      setSrcA(want);
+    }
+    paintMode(m);
   }
   modes.forEach((k) => $('#tab-' + k).addEventListener('click', () => setMode(k)));
 
-  const lists = { a: new VList($('#a-files')), b: new VList($('#b-files')), c: new VList($('#c-files')), d: new VList($('#d-files')) };
+  const lists = { a: new VList($('#a-files')), b: new VList($('#b-files')), c: new VList($('#c-files')) };
+  ['a', 'b', 'c'].forEach((k) => fillSides(k, []));
   function setBusy(k, busy) {
     S[k].busy = busy;
     $('#' + k + '-go').disabled = busy;
@@ -897,54 +1032,38 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
   // ================================================================== TAB A: to .zip
   function setSrcA(v) {
+    $('#a-src-' + v).checked = true;
     $('#a-file').accept = v === 'cf' ? '.zip' : '.mrpack,.zip';
-    $('#a-drop-title').textContent = v === 'cf' ? 'Drop your CurseForge pack here' : 'Drop a .mrpack here';
+    if (curMode === 'a' || curMode === 'd') paintMode(v === 'cf' ? 'd' : 'a');
+    $('#a-drop-title').textContent = v === 'cf' ? 'Drop your CurseForge export here' : 'Drop a .mrpack here';
     $('#a-drop-sub').textContent = v === 'cf'
-      ? 'the zip CurseForge exports, with manifest.json, overrides and modlist.html. Every mod is downloaded and added.'
+      ? 'the .zip from CurseForge (manifest.json, overrides, modlist.html). Every mod is downloaded and added, so you get a full zip.'
       : 'or click to choose a file. The mods are downloaded and added to the zip.';
   }
+  document.querySelectorAll('input[name="a-srctype"]').forEach((r) => r.addEventListener('change', () => setSrcA(r.value)));
 
+  function checkBig(k, bytes) {
+    const n = $('#' + k + '-big'), msgs = [];
+    if (bytes > 3.8 * 1024 * MB) msgs.push('This pack comes to about ' + fmtBytes(bytes) + '. One zip cannot go past 4 GB here, so the build may fail. Use "Build for" client or server to make it smaller.');
+    if (!window.showSaveFilePicker && bytes > 600 * MB) msgs.push('This browser cannot write the file straight to disk, so the whole result is built in memory first. For a pack this big, use Chrome or Edge on a computer.');
+    n.textContent = msgs.join(' '); n.hidden = !msgs.length;
+  }
+  function resetA() {
+    const st = S.a;
+    ['#a-error', '#a-result', '#a-progress', '#a-pack', '#a-save', '#a-note', '#a-big'].forEach(hide);
+    st.blob = null; st.src = null; st.preview = null; st.resolved = null; st.rows = []; st.listShown = false;
+  }
   wireDrop($('#a-drop'), $('#a-file'), async (file) => {
     const st = S.a;
     if (st.busy) return;
-    hide('#a-error'); hide('#a-result'); hide('#a-progress'); hide('#a-pack'); hide('#a-save'); hide('#a-note'); st.blob = null; st.resolved = null; st.tok = (st.tok || 0) + 1;
+    resetA();
     let src;
     try { src = await readSource(file); } catch (e) { return showMsg('#a-error', describeError(e), 'err'); }
     if (src.kind === 'instance') return showMsg('#a-error', 'This zip has no modrinth.index.json or CurseForge manifest.json, so it is already a plain instance zip. Use the .zip → .mrpack tab to make an .mrpack from it.', 'err');
     setSrcA(src.kind === 'cf' ? 'cf' : 'mr');     // follow what the file really is, whichever option was picked
     st.src = src;
     renderA();
-    if (src.kind === 'cf') resolveA();
   });
-
-  // A CurseForge pack lists IDs only, so ask CurseForge for the names, files and sizes right away.
-  function applyResolvedA(resolved) {
-    const rows = S.a.rows; let total = 0;
-    resolved.forEach((it, i) => {
-      if (!rows[i]) return;
-      Object.assign(rows[i], { path: it.missing ? it.name + '  ·  file ' + it.fileID + ' (no longer listed)' : it.name + '  ·  ' + it.fileName, size: fmtBytes(it.size || 0), it });
-      total += it.size || 0;
-    });
-    $('#a-size').textContent = fmtBytes(total);
-    lists.a.sched();
-  }
-  async function resolveA() {
-    const st = S.a, src = st.src, tok = st.tok;
-    await helperReady;
-    if (tok !== st.tok || !src || src.kind !== 'cf') return;
-    if (!Net.helper && !S.key.trim()) { showMsg('#a-note', LEAN ? NO_CF : 'Mod names need a helper or relay. See Relay settings.', 'warn'); return; }
-    showMsg('#a-note', 'Looking up the ' + src.manifest.files.length + ' mods on CurseForge…', 'info');
-    try {
-      const resolved = await cfResolve(src.manifest, newCtl());
-      if (tok !== st.tok) return;
-      st.resolved = resolved;
-      histSetMods(src, resolved.map((it) => ({ n: it.name, f: it.missing ? 'file ' + it.fileID + ' (no longer listed)' : it.fileName, v: '' })));
-      applyResolvedA(resolved);
-      st.rows.forEach((r) => { if (r.it && r.it.missing) { r.state = 'bad'; r.label = 'missing'; } });
-      const gone = resolved.filter((it) => it.missing).length;
-      if (gone) showMsg('#a-note', gone + ' of the mods are no longer listed on CurseForge and will be skipped.', 'warn'); else hide('#a-note');
-    } catch (e) { if (tok === st.tok) showMsg('#a-note', describeError(e), 'warn'); }
-  }
 
   function selectFiles(files, target) {
     return files.filter((f) => {
@@ -966,6 +1085,71 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     return { map, skipped };
   }
   const cfOverrideRoot = (src) => src.root + (src.manifest.overrides || 'overrides');
+
+  function paintListA() {
+    const st = S.a, v = $('#a-side').value || 'all';
+    fillSides('a', st.rows);
+    $('#a-sidebar').hidden = !st.rows.length;
+    if (st.listShown) return;
+    const shown = st.rows.filter((r) => sideMatch(r, v));
+    lists.a.sideView = v;
+    lists.a.set(shown);
+    $('#a-sidecount').textContent = v === 'all' ? '' : shown.length + ' of ' + st.rows.length + ' files' + (shown.length ? '' : ' have this side.');
+  }
+  $('#a-side').addEventListener('change', paintListA);
+  const cfRowPath = (it) => it.missing ? it.name + '  (file ' + it.fileID + ' unavailable)' : it.name + '  ·  ' + it.fileName;
+  function applyPreviewA(res) {
+    const st = S.a; let total = 0;
+    st.rows.forEach((r, i) => {
+      const it = res[i]; if (!it) return;
+      Object.assign(r, { path: cfRowPath(it), size: fmtBytes(it.size || 0), side: it.side, it });
+      if (it.missing) { r.state = 'bad'; r.label = 'removed'; }
+      total += it.size || 0;
+    });
+    $('#a-size').textContent = fmtBytes(total);
+    checkBig('a', total + st.src.file.size);
+    st.listShown = false;
+    paintListA();
+  }
+  // Fallback when CurseForge cannot be reached: list the names from modlist.html, as the Inspect tab does.
+  // That file has no IDs, so these rows are for reading only. The real rows return when the lookup or build runs.
+  async function showListedA(src) {
+    const mlPath = src.names.find((n) => /(^|\/)modlist\.html$/i.test(n));
+    if (!mlPath) return false;
+    let listed = [];
+    try { listed = parseModlist(fflate.strFromU8((await extract(src.u8, [mlPath]))[mlPath])); } catch (e) { return false; }
+    if (!listed.length || S.a.src !== src || S.a.busy) return false;
+    listed.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    S.a.listShown = true;
+    lists.a.set(listed.map((x) => ({ path: x.name + (x.author ? '  ·  by ' + x.author : ''), size: '', state: '', label: 'ready' })));
+    return true;
+  }
+  // Fills in real mod names and file names before the build, as soon as CurseForge can be reached.
+  async function previewNamesA() {
+    const st = S.a, src = st.src;
+    if (!src || src.kind !== 'cf' || st.busy || st.resolved === src) return;
+    if (!(Net.helper && (S.key.trim() || Net.relayKey))) {
+      const listed = await showListedA(src);
+      const why = LEAN ? 'CurseForge cannot be reached right now.' : 'CurseForge needs a helper or relay and a key (see Relay settings).';
+      if (S.a.src === src) showMsg('#a-note', listed ? 'Names come from modlist.html in the zip. ' + why + ' Exact file names and sizes appear once it can be reached, and every mod is still downloaded by ID.' : 'No modlist.html in this zip, so the list shows CurseForge IDs. ' + why, 'info');
+      return;
+    }
+    st.resolved = src;
+    showMsg('#a-note', 'Looking up mod names on CurseForge…', 'info');
+    try {
+      const res = await cfResolve(src.manifest, newCtl());
+      if (S.a.src !== src) return;
+      st.preview = res;
+      if (!st.busy) applyPreviewA(res);
+      const gone = res.filter((r) => r.missing).length;
+      showMsg('#a-note', 'Names and file names came from CurseForge.' + (gone ? ' ' + gone + ' file(s) were removed from CurseForge and cannot be downloaded.' : ''), gone ? 'warn' : 'info');
+    } catch (e) {
+      if (S.a.src !== src) return;
+      st.resolved = null;
+      const listed = await showListedA(src);
+      if (S.a.src === src) showMsg('#a-note', 'Could not look up exact files yet. ' + describeError(e) + (listed ? ' Names shown are from modlist.html.' : ' The list shows CurseForge IDs until the build.'), 'warn');
+    }
+  }
 
   function renderA() {
     const st = S.a, src = st.src, isCf = src.kind === 'cf';
@@ -993,23 +1177,27 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     $('#a-go').textContent = 'Download mods and build zip';
     buildRowsA();
     $('#a-pack').hidden = false;
+    previewNamesA();
   }
   function buildRowsA() {
     const st = S.a, src = st.src;
     if (src.kind === 'cf') {
-      st.rows = src.manifest.files.map((f) => ({ path: 'CurseForge project ' + f.projectID + ' · file ' + f.fileID, size: '', state: '', label: 'ready', f }));
+      st.rows = src.manifest.files.map((f) => ({ path: 'CurseForge project ' + f.projectID + ' · file ' + f.fileID, size: '', state: '', label: 'ready', side: 'unknown', f }));
       $('#a-nfiles').textContent = String(st.rows.length);
       $('#a-size').textContent = '—';
+      checkBig('a', src.file.size);
       $('#a-nover').textContent = String(planOverrides(src.names, 'all', [cfOverrideRoot(src)]).map.size);
     } else {
       const files = selectFiles(src.index.files, $('#a-target').value);
       let total = 0;
-      st.rows = files.map((f) => { total += f.fileSize || 0; return { path: f.path || '(no path)', size: fmtBytes(f.fileSize || 0), state: '', label: 'ready', f }; });
+      st.rows = files.map((f) => { total += f.fileSize || 0; const env = f.env || {}; return { path: f.path || '(no path)', size: fmtBytes(f.fileSize || 0), state: '', label: 'ready', side: sideFrom(env.client, env.server), f }; });
       $('#a-nfiles').textContent = String(files.length);
       $('#a-size').textContent = fmtBytes(total);
+      checkBig('a', total + src.file.size);
       $('#a-nover').textContent = String(planOverrides(src.names, $('#a-target').value).map.size);
     }
-    lists.a.set(st.rows);
+    st.listShown = false;
+    paintListA();
   }
   $('#a-target').addEventListener('change', () => {
     if (S.a.busy || !S.a.src) return;
@@ -1020,13 +1208,13 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   $('#a-cancel').addEventListener('click', () => { if (S.a.ctl) S.a.ctl.cancel(); });
   $('#a-go').addEventListener('click', buildA);
 
-  async function writeOverrides(sink, src, plan, ctl, onStep, prefix) {
+  async function writeOverrides(sink, src, plan, ctl, onStep) {
     const items = [...plan.map].map(([dest, name]) => ({ dest, name }));
     let n = 0;
     for (const batch of batches(items, (it) => src.sizes.get(it.name))) {
       ctl.check();
       const data = await extract(src.u8, batch.map((b) => b.name));
-      for (const b of batch) sink.add((prefix || '') + b.dest, data[b.name], STORE_RE.test(b.dest));
+      for (const b of batch) sink.add(b.dest, data[b.name], STORE_RE.test(b.dest));
       await sink.drain();
       n += batch.length; onStep(n, items.length);
     }
@@ -1049,7 +1237,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       sink = await openSink(outName, 'zip');           // must run first: the save dialog needs the click
       st.outName = outName;
       const rows = st.rows, list = lists.a;
-      rows.forEach((r) => { r.state = ''; r.label = 'waiting'; }); list.sched();
+      rows.forEach((r) => { r.state = ''; r.label = 'waiting'; });
+      st.listShown = false; paintListA();
       const failed = [];
       let skipped = 0, written;
 
@@ -1060,28 +1249,38 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
       if (isCf) {
         setProgress('a', 0.08, 'Asking CurseForge about ' + rows.length + ' files…');
-        const resolved = st.resolved || await cfResolve(src.manifest, ctl);
-        applyResolvedA(resolved);
+        const resolved = st.preview || await cfResolve(src.manifest, ctl);
+        let total = 0;
+        resolved.forEach((it, i) => {
+          Object.assign(rows[i], { path: cfRowPath(it), size: fmtBytes(it.size || 0), side: it.side, it });
+          total += it.size || 0;
+        });
+        $('#a-size').textContent = fmtBytes(total);
+        paintListA();
       }
 
-      let done = 0; const total = rows.length; let okBytes = 0;
-      const step = () => { done++; setProgress('a', 0.1 + 0.87 * done / Math.max(total, 1), 'Downloading ' + done + ' of ' + total + '… ' + fmtBytes(okBytes)); };
+      let done = 0; const total = rows.length; let okBytes = 0, inflight = 0;
+      const paint = () => setProgress('a', 0.1 + 0.87 * done / Math.max(total, 1), 'Downloading ' + done + ' of ' + total + '… ' + fmtBytes(okBytes + Math.max(inflight, 0)));
+      const step = () => { done++; paint(); };
+      Net.onBytes = (d) => { inflight += d; paint(); };
+      const budget = new ByteBudget(160 * MB);
       await pool(rows, 6, async (row) => {
         const path = isCf ? (row.it && row.it.path) : safePath(row.f.path);
         if (path && written.has(path)) { row.state = 'warn'; row.label = 'bundled'; list.sched(); step(); return; }
+        const hold = await budget.take(Math.max(4 * MB, (isCf ? (row.it && row.it.size) : row.f.fileSize) || 0));
         row.state = 'run'; row.label = 'loading'; list.sched();
         try {
           if (!path) throw new Error(isCf ? 'not found on CurseForge' : 'unsafe path in index');
           const bytes = isCf ? await cfDownload(row.it, ctl) : await getBytes(row.f.downloads || [], ctl, (u8) => verifyHashes(u8, row.f.hashes || {}));
           sink.add(path, bytes, STORE_RE.test(path)); written.add(path);
-          okBytes += bytes.length;
+          okBytes += bytes.length; inflight -= bytes.length;
           row.state = 'ok'; row.label = 'ok';
           await sink.drain();
         } catch (e) {
           if (e instanceof Cancelled || ctl.aborted) throw new Cancelled();
           failed.push({ path: path || row.path, reason: describeError(e), urls: isCf ? [row.it && row.it.site].filter(Boolean) : (row.f.downloads || []) });
           row.state = 'bad'; row.label = 'failed';
-        }
+        } finally { budget.give(hold); }
         list.sched(); step();
       }, ctl);
 
@@ -1103,12 +1302,11 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       if (failed.length) text += ' ' + failed.length + ' failed and are listed in DOWNLOAD_FAILED.txt inside the zip.';
       showMsg('#a-result', text, failed.length ? 'warn' : 'ok');
       finishOutput('a', out, outName);
-      histAction(src, src.kind === 'cf' ? 'Unpacked with its mods to a .zip' : 'Unpacked to a .zip');
     } catch (e) {
       if (sink) await sink.abort();
       if (e instanceof Cancelled) { showMsg('#a-result', 'Cancelled. Nothing was saved.', 'info'); hide('#a-progress'); }
       else showMsg('#a-result', 'The build stopped. ' + describeError(e), 'err');
-    } finally { setBusy('a', false); }
+    } finally { Net.onBytes = null; setBusy('a', false); }
   }
 
   // ================================================================== TAB B: to .mrpack
@@ -1120,7 +1318,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   wireDrop($('#b-drop'), $('#b-file'), async (file) => {
     const st = S.b;
     if (st.busy) return;
-    hide('#b-error'); hide('#b-result'); hide('#b-progress'); hide('#b-note'); hide('#b-pack'); hide('#b-save'); st.blob = null;
+    hide('#b-error'); hide('#b-result'); hide('#b-progress'); hide('#b-note'); hide('#b-big'); hide('#b-pack'); hide('#b-save'); st.blob = null;
     let src;
     try { src = await readSource(file); } catch (e) { return showMsg('#b-error', describeError(e), 'err'); }
     if (src.kind === 'mrpack') return showMsg('#b-error', 'This is already an .mrpack. Use the .mrpack → .zip tab to unpack it.', 'err');
@@ -1158,6 +1356,16 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     $('#b-nmods').textContent = String(mods); $('#b-nres').textContent = String(res); $('#b-nother').textContent = String(other);
     return c;
   }
+  function paintListB() {
+    const st = S.b, v = $('#b-side').value || 'all';
+    fillSides('b', st.rows);
+    $('#b-sidebar').hidden = !st.rows.length;
+    const shown = st.rows.filter((r) => sideMatch(r, v));
+    lists.b.sideView = v;
+    lists.b.set(shown);
+    $('#b-sidecount').textContent = v === 'all' ? '' : shown.length + ' of ' + st.rows.length + ' files' + (shown.length ? '' : ' have this side.');
+  }
+  $('#b-side').addEventListener('change', paintListB);
   function syncLoaderField() { $('#b-loaderver').disabled = $('#b-loader').value === 'none'; }
   $('#b-loader').addEventListener('change', syncLoaderField);
   $('#b-skip').addEventListener('change', () => { const s = S.b.src; if (s && s.kind === 'instance' && !S.b.busy) countsInstance(); });
@@ -1180,10 +1388,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       ? 'Game folders found inside "' + src.root + '". That prefix is removed from every path.'
       : (src.names.some((p) => /^(mods|config)\//.test(p)) ? 'Game folders found at the top level of the zip.' : 'No mods or config folder found, so files are packed with their paths unchanged.');
     $('#b-cf').hidden = true; $('#b-skipwrap').hidden = false;
+    checkBig('b', src.file.size);
     $('#b-name').value = src.file.name.replace(/\.[^.]+$/, '');
     $('#b-version').value = '1.0.0'; $('#b-mc').value = ''; $('#b-loaderver').value = '';
-    lists.b.set([]);
-    S.b.rows = [];
+    S.b.rows = []; paintListB();
     $('#b-pack').hidden = false;
     syncLoaderField();
 
@@ -1227,7 +1435,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const l = cfLoader(m);
     if (l) setLoader(l.key, l.version); else { $('#b-loader').value = 'none'; $('#b-loaderver').value = ''; syncLoaderField(); }
     showMsg('#b-note', 'Minecraft and loader versions were read from the manifest.' + (Net.helper || LEAN ? '' : ' CurseForge needs the helper or a relay, see Relay settings.'), 'info');
-    lists.b.set([]); S.b.rows = [];
+    S.b.rows = []; paintListB();
     $('#b-pack').hidden = false;
   }
   $('#b-save').addEventListener('click', () => { if (S.b.blob) saveBlob(S.b.blob, S.b.outName); });
@@ -1239,6 +1447,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const hs = await Promise.all(batch.map(async (b) => Object.assign(b, { sha1: await digest('SHA-1', b.bytes), sha512: await digest('SHA-512', b.bytes) })));
     const found = await mrVersions([...new Set(hs.map((h) => h.sha512))]);
     for (const h of hs) {
+      if (sideKey(h.row) === 'unknown') { const j = /^(resourcepacks|shaderpacks)\//i.test(h.rel) ? null : jarInfo(h.bytes); h.row.side = /^(resourcepacks|shaderpacks)\//i.test(h.rel) ? 'client' : ((j && j.side) || 'unknown'); }
       const v = found[h.sha512];
       const file = v && (v.files || []).find((f) => f.hashes && f.hashes.sha512 === h.sha512);
       if (file && file.url) {
@@ -1281,8 +1490,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       if (src.kind === 'instance') {
         const c = collectInstance(); excluded = c.excluded;
         const cands = c.items.filter((it) => it.lookup), rest = c.items.filter((it) => !it.lookup);
-        st.rows = cands.map((it) => ({ path: it.rel, size: '', state: '', label: 'waiting', it }));
-        list.set(st.rows);
+        st.rows = cands.map((it) => ({ path: it.rel, size: '', state: '', label: 'waiting', side: 'unknown', it }));
+        paintListB();
         const total = cands.length + rest.length; let done = 0;
         for (const batch of batches(st.rows, (r) => src.sizes.get(r.it.full))) {
           ctl.check();
@@ -1312,8 +1521,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
         }
         setProgress('b', 0.05, 'Asking CurseForge about ' + src.manifest.files.length + ' files…');
         const resolved = await cfResolve(src.manifest, ctl);
-        st.rows = resolved.map((it) => ({ path: it.missing ? it.name + ' (file ' + it.fileID + ')' : it.path, size: fmtBytes(it.size || 0), state: '', label: 'waiting', it }));
-        list.set(st.rows);
+        st.rows = resolved.map((it) => ({ path: it.missing ? it.name + ' (file ' + it.fileID + ')' : it.path, size: fmtBytes(it.size || 0), state: '', label: 'waiting', side: it.side, it }));
+        paintListB();
         let done = 0;
         for (const batch of batches(st.rows, (r) => r.it.size, 18, 40 * MB)) {
           ctl.check();
@@ -1354,8 +1563,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
       // show project names next to linked rows
       const byPath = new Map(ctx.files.map((f) => [f.path, f]));
-      st.rows.forEach((r) => { if (r.label === 'linked') { const f = byPath.get(r.it.full ? r.it.rel : r.it.path); const p = f && projects[f.project]; if (p) r.size = p.title; } });
-      list.sched();
+      st.rows.forEach((r) => { if (r.label === 'linked') { const f = byPath.get(r.it.full ? r.it.rel : r.it.path); const p = f && projects[f.project]; if (p) { r.size = p.title; const sd = sideFrom(p.client_side, p.server_side); if (sd !== 'unknown') r.side = sd; } } });
+      paintListB();
 
       setProgress('b', 0.97, 'Closing the .mrpack…');
       const out = await sink.finish();
@@ -1369,7 +1578,6 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       text += out.saved ? ' Pack saved where you chose.' : ' Pack size ' + fmtBytes(out.blob.size) + '.';
       showMsg('#b-result', text, (ctx.bundled || failed.length) ? 'warn' : 'ok');
       finishOutput('b', out, outName);
-      histAction(src, 'Made an .mrpack');
     } catch (e) {
       if (sink) await sink.abort();
       if (e instanceof Cancelled) { showMsg('#b-result', 'Cancelled. Nothing was saved.', 'info'); hide('#b-progress'); }
@@ -1413,7 +1621,13 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const pick = (k) => { const m = new RegExp('^\\s*' + k + '\\s*=\\s*["\']([^"\']*)["\']', 'm').exec(block); return m ? m[1] : ''; };
     let version = pick('version');
     if (/^\$\{/.test(version)) version = '';
-    return { id: pick('modId'), name: pick('displayName') || pick('modId'), version };
+    const core = [];
+    t.split(/\[\[dependencies\.[^\]]*\]\]/).slice(1).forEach((b) => {
+      const id = /modId\s*=\s*["']([^"']*)["']/.exec(b), sd = /side\s*=\s*["']([^"']*)["']/i.exec(b);
+      if (id && sd && /^(minecraft|forge|neoforge)$/i.test(id[1])) core.push(sd[1].toUpperCase());
+    });
+    const side = !core.length ? 'unknown' : core.every((x) => x === 'CLIENT') ? 'client' : core.every((x) => x === 'SERVER') ? 'server' : 'both';
+    return { id: pick('modId'), name: pick('displayName') || pick('modId'), version, side };
   }
   function jarInfo(bytes) {
     let f = {};
@@ -1421,26 +1635,29 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const txt = (n) => (f[n] ? fflate.strFromU8(f[n]) : null);
     try {
       let t;
-      if ((t = txt('fabric.mod.json'))) { const j = JSON.parse(t); return { loader: 'fabric', id: j.id, name: j.name || j.id, version: j.version }; }
-      if ((t = txt('quilt.mod.json'))) { const q = JSON.parse(t).quilt_loader || {}; return { loader: 'quilt', id: q.id, name: (q.metadata && q.metadata.name) || q.id, version: q.version }; }
+      if ((t = txt('fabric.mod.json'))) { const j = JSON.parse(t); return { loader: 'fabric', id: j.id, name: j.name || j.id, version: j.version, side: j.environment === 'client' ? 'client' : j.environment === 'server' ? 'server' : 'both' }; }
+      if ((t = txt('quilt.mod.json'))) { const q = JSON.parse(t).quilt_loader || {}; const env = q.minecraft && q.minecraft.environment; return { loader: 'quilt', id: q.id, name: (q.metadata && q.metadata.name) || q.id, version: q.version, side: env === 'client' ? 'client' : env === 'dedicated_server' ? 'server' : 'both' }; }
       if ((t = txt('META-INF/neoforge.mods.toml'))) return Object.assign({ loader: 'neoforge' }, tomlMod(t));
       if ((t = txt('META-INF/mods.toml'))) return Object.assign({ loader: 'forge' }, tomlMod(t));
-      if ((t = txt('mcmod.info'))) { let j = JSON.parse(t); j = Array.isArray(j) ? j[0] : (j.modList ? j.modList[0] : j); return { loader: 'forge', id: j.modid, name: j.name || j.modid, version: j.version }; }
+      if ((t = txt('mcmod.info'))) { let j = JSON.parse(t); j = Array.isArray(j) ? j[0] : (j.modList ? j.modList[0] : j); return { loader: 'forge', id: j.modid, name: j.name || j.modid, version: j.version, side: 'unknown' }; }
     } catch (e) { return null; }
     return null;
   }
 
   function sortItems() { C.items.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })); }
-  function rowOf(it) { return { path: it.name + (it.file ? '  ·  ' + it.file : ''), size: it.version || '', state: it.flag ? 'warn' : '', label: it.flag || it.kind || 'mod' }; }
+  function rowOf(it) { return { path: it.name + (it.file ? '  ·  ' + it.file : ''), side: it.side, size: it.version || '', state: it.flag ? 'warn' : '', label: it.flag || it.kind || 'mod' }; }
   function refreshC() {
     const q = $('#c-q').value.trim().toLowerCase(), t = $('#c-type').value;
-    C.shown = C.items.filter((it) => (t === 'all' || (t === 'flag' ? !!it.flag : it.kind === t)) && (!q || (it.name + ' ' + it.file + ' ' + it.version).toLowerCase().indexOf(q) !== -1));
+    fillSides('c', C.items);
+    const sv = $('#c-side').value || 'all';
+    lists.c.sideView = sv;
+    C.shown = C.items.filter((it) => sideMatch(it, sv) && (t === 'all' || (t === 'flag' ? !!it.flag : it.kind === t)) && (!q || (it.name + ' ' + it.file + ' ' + it.version).toLowerCase().indexOf(q) !== -1));
     lists.c.set(C.shown.map(rowOf));
     $('#c-n1').textContent = String(C.items.length);
     $('#c-n3').textContent = String(C.items.filter((it) => it.flag).length);
     $('#c-count').textContent = C.shown.length === C.items.length ? C.items.length + ' entries' : C.shown.length + ' of ' + C.items.length + ' entries';
   }
-  ['input', 'change'].forEach((ev) => { $('#c-q').addEventListener(ev, refreshC); $('#c-type').addEventListener(ev, refreshC); });
+  ['input', 'change'].forEach((ev) => { $('#c-q').addEventListener(ev, refreshC); $('#c-type').addEventListener(ev, refreshC); $('#c-side').addEventListener(ev, refreshC); });
   function setHead(o) {
     $('#c-name').textContent = o.name || '';
     $('#c-ver').textContent = o.ver ? 'v' + o.ver : ''; $('#c-ver').hidden = !o.ver;
@@ -1502,15 +1719,15 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       const res = await cfResolve(m, newCtl());
       if (tok !== C.token) return;
       C.items = res.map((it) => {
-        if (it.missing) return { name: it.name, file: 'file ' + it.fileID, version: '', kind: 'mod', site: it.site, note: 'file removed or unavailable', flag: 'unavailable' };
+        if (it.missing) return { name: it.name, file: 'file ' + it.fileID, version: '', kind: 'mod', site: it.site, note: 'file removed or unavailable', flag: 'unavailable', side: 'unknown' };
         const loaders = it.gv.map((v) => v.toLowerCase()).filter((v) => LOADER_LABEL[v]);
         return {
-          name: it.name, file: it.fileName, version: it.display !== it.fileName ? it.display : '', kind: it.kind, site: it.site,
+          name: it.name, file: it.fileName, version: it.display !== it.fileName ? it.display : '', kind: it.kind, side: it.side, site: it.site,
           note: [it.release, it.date, it.author && 'by ' + it.author].filter(Boolean).join(', '),
           flag: flagFor(it.gv.filter((v) => /^\d+\.\d+/.test(v)), loaders, C.pack)
         };
       });
-      sortItems(); refreshC(); hide('#c-lookup'); histSetMods(C.src, C.items.map((it) => ({ n: it.name, f: it.file, v: it.version })));
+      sortItems(); refreshC(); hide('#c-lookup');
       showMsg('#c-note', 'Exact files and versions came from CurseForge. ' + flagSummary(), 'info');
     } catch (e) {
       if (tok === C.token) showMsg('#c-note', describeError(e), 'warn');
@@ -1530,7 +1747,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const kindOf = (p) => /^resourcepacks\//.test(p) ? 'resource pack' : /^shaderpacks\//.test(p) ? 'shader' : /^datapacks\//.test(p) ? 'datapack' : 'mod';
     C.items = ix.files.map((f) => ({
       name: String(f.path || '').split('/').pop().replace(/\.(jar|zip)$/i, ''), file: f.path || '', version: '', kind: kindOf(String(f.path || '')),
-      site: (f.downloads || [])[0] || '', note: f.env ? 'client ' + f.env.client + ', server ' + f.env.server : '', flag: '', hash: (f.hashes || {}).sha512
+      site: (f.downloads || [])[0] || '', note: f.env ? 'client ' + f.env.client + ', server ' + f.env.server : '', flag: '', hash: (f.hashes || {}).sha512,
+      side: f.env ? sideFrom(f.env.client, f.env.server) : 'unknown'
     }));
     sortItems(); refreshC();
     $('#c-count').textContent = 'Looking up names on Modrinth…';
@@ -1545,10 +1763,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       const p = projects[v.project_id];
       if (p) { it.name = p.title; it.site = 'https://modrinth.com/project/' + (p.slug || p.id); }
       it.version = v.version_number || '';
+      if (sideKey(it) === 'unknown' && p) it.side = sideFrom(p.client_side, p.server_side);
       it.flag = flagFor(v.game_versions || [], v.loaders || [], C.pack);
     });
     sortItems(); refreshC();
-    histSetMods(src, C.items.map((it) => ({ n: it.name, f: it.file, v: it.version })));
     showMsg('#c-note', 'Names and versions came from Modrinth for ' + Object.keys(found).length + ' of ' + hashes.length + ' files. ' + flagSummary(), 'info');
   }
 
@@ -1573,8 +1791,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     setHead({ name: src.file.name.replace(/\.[^.]+$/, ''), src: 'Instance zip', sub: root ? 'Game folders inside "' + root + '".' : '', chips, bundled: inRoot.length - jars.length - packs.length });
     const base = (n) => rel(n).split('/').pop();
     const jarItems = new Map();
-    C.items = packs.map((n) => ({ name: base(n).replace(/\.(jar|zip)$/i, ''), file: rel(n), version: '', kind: /^shaderpacks\//i.test(rel(n)) ? 'shader' : 'resource pack', site: '', note: '', flag: '' }));
-    jars.forEach((n) => { const it = { name: base(n).replace(/\.jar$/i, ''), file: rel(n), version: '', kind: 'mod', site: '', note: 'no mod metadata found', flag: '', loader: '' }; jarItems.set(n, it); C.items.push(it); });
+    C.items = packs.map((n) => ({ name: base(n).replace(/\.(jar|zip)$/i, ''), file: rel(n), version: '', kind: /^shaderpacks\//i.test(rel(n)) ? 'shader' : 'resource pack', site: '', note: '', flag: '', side: 'client' }));
+    jars.forEach((n) => { const it = { name: base(n).replace(/\.jar$/i, ''), file: rel(n), version: '', kind: 'mod', site: '', note: 'no mod metadata found', flag: '', loader: '', side: 'unknown' }; jarItems.set(n, it); C.items.push(it); });
     sortItems(); refreshC();
     const counts = {};
     let done = 0;
@@ -1584,7 +1802,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       for (const n of batch) {
         const info = jarInfo(data[n]), it = jarItems.get(n);
         if (info) {
-          it.name = info.name || it.name; it.version = info.version || ''; it.loader = info.loader; it.note = info.id ? 'id ' + info.id + ', ' + info.loader : info.loader;
+          it.name = info.name || it.name; it.version = info.version || ''; it.loader = info.loader; it.side = info.side || 'unknown'; it.note = info.id ? 'id ' + info.id + ', ' + info.loader : info.loader;
           counts[info.loader] = (counts[info.loader] || 0) + 1;
         }
         done++;
@@ -1598,7 +1816,6 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     }
     C.items.forEach((it) => { if (it.loader) it.flag = flagFor([], [it.loader], C.pack); });
     sortItems(); refreshC();
-    histSetMods(src, C.items.map((it) => ({ n: it.name, f: it.file, v: it.version })));
     const kinds = Object.keys(counts).map((k) => counts[k] + ' ' + LOADER_LABEL[k]).join(', ');
     showMsg('#c-note', (kinds ? 'Mod metadata read from the jars: ' + kinds + '. ' : 'No mod metadata found in the jars. ') + (mc ? '' : 'The Minecraft version is not recorded in this zip. ') + flagSummary(), 'info');
   }
@@ -1609,8 +1826,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     return '"' + v.replace(/"/g, '""') + '"';
   }
   $('#c-csv').addEventListener('click', () => {
-    const head = ['name', 'file', 'version', 'type', 'note', 'link', 'flag'];
-    const lines = [head.join(',')].concat(C.shown.map((it) => [it.name, it.file, it.version, it.kind, it.note, it.site, it.flag].map(csvCell).join(',')));
+    const head = ['name', 'file', 'version', 'type', 'side', 'note', 'link', 'flag'];
+    const lines = [head.join(',')].concat(C.shown.map((it) => [it.name, it.file, it.version, it.kind, sideKey(it), it.note, it.site, it.flag].map(csvCell).join(',')));
     saveBlob(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv' }), 'modlist.csv');
   });
   $('#c-copy').addEventListener('click', async () => {
@@ -1619,384 +1836,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     catch (e) { saveBlob(new Blob([text], { type: 'text/plain' }), 'modlist.txt'); $('#c-count').textContent = 'The browser blocked the clipboard, so modlist.txt was saved instead.'; }
   });
 
-
-  // ================================================================== TAB D: to a CurseForge pack
-  // CurseForge identifies a file by a hash of its bytes with whitespace removed (MurmurHash2, seed 1).
-  function cfFingerprint(u8) {
-    const buf = new Uint8Array(u8.length);
-    let len = 0;
-    for (let i = 0; i < u8.length; i++) { const b = u8[i]; if (b !== 9 && b !== 10 && b !== 13 && b !== 32) buf[len++] = b; }
-    const m = 0x5bd1e995;
-    let h = (1 ^ len) >>> 0, i = 0;
-    for (; len - i >= 4; i += 4) {
-      let k = (buf[i] | (buf[i + 1] << 8) | (buf[i + 2] << 16) | (buf[i + 3] << 24)) >>> 0;
-      k = Math.imul(k, m) >>> 0; k = (k ^ (k >>> 24)) >>> 0; k = Math.imul(k, m) >>> 0;
-      h = Math.imul(h, m) >>> 0; h = (h ^ k) >>> 0;
-    }
-    const rest = len - i;
-    if (rest >= 3) h = (h ^ (buf[i + 2] << 16)) >>> 0;
-    if (rest >= 2) h = (h ^ (buf[i + 1] << 8)) >>> 0;
-    if (rest >= 1) { h = (h ^ buf[i]) >>> 0; h = Math.imul(h, m) >>> 0; }
-    h = (h ^ (h >>> 13)) >>> 0; h = Math.imul(h, m) >>> 0; h = (h ^ (h >>> 15)) >>> 0;
-    return h >>> 0;
-  }
-  const escHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const CF_LOADER_ID = { forge: 'forge', neoforge: 'neoforge', 'fabric-loader': 'fabric', 'quilt-loader': 'quilt' };
-  const D = S.d;
-
-  function collectInst(src, skip) {
-    const items = []; let excluded = 0;
-    src.names.forEach((full) => {
-      if (full.indexOf(src.root) !== 0) return;
-      const rel = full.slice(src.root.length);
-      if (!rel || JUNK_RE.test(rel) || rel === 'modrinth.index.json') return;
-      if (skip && EXCL_RE.test(rel)) { excluded++; return; }
-      items.push({ full, rel, lookup: LOOKUP_RE.test(rel) });
-    });
-    return { items, excluded };
-  }
-  function syncLoaderD() { $('#d-loaderver').disabled = $('#d-loader').value === 'none'; }
-  $('#d-loader').addEventListener('change', syncLoaderD);
-
-  wireDrop($('#d-drop'), $('#d-file'), async (file) => {
-    if (D.busy) return;
-    hide('#d-error'); hide('#d-result'); hide('#d-progress'); hide('#d-note'); hide('#d-pack'); hide('#d-save'); D.blob = null;
-    let src;
-    try { src = await readSource(file); } catch (e) { return showMsg('#d-error', describeError(e), 'err'); }
-    if (src.kind === 'cf') return showMsg('#d-error', 'This is already a CurseForge pack. Use the first tab to unpack it with its mods, or Inspect a pack to see what is inside.', 'err');
-    D.src = src;
-    await renderD();
-  });
-
-  function countsD() {
-    const src = D.src;
-    if (src.kind === 'mrpack') {
-      D.rows = src.index.files.map((f) => { const size = fmtBytes(f.fileSize || 0); return { path: f.path || '(no path)', size, size0: size, state: '', label: 'ready', f }; });
-      $('#d-nother').textContent = String(planOverrides(src.names, 'all').map.size);
-    } else {
-      const c = collectInst(src, $('#d-skip').checked);
-      D.rows = c.items.filter((it) => it.lookup).map((it) => { const size = fmtBytes(src.sizes.get(it.full) || 0); return { path: it.rel, size, size0: size, state: '', label: 'ready', it }; });
-      $('#d-nother').textContent = String(c.items.length - D.rows.length);
-    }
-    $('#d-nmods').textContent = String(D.rows.length);
-    lists.d.set(D.rows);
-  }
-  $('#d-skip').addEventListener('change', () => { if (D.src && D.src.kind === 'instance' && !D.busy) countsD(); });
-
-  async function renderD() {
-    const src = D.src, isMr = src.kind === 'mrpack';
-    let name = src.file.name.replace(/\.[^.]+$/, ''), version = '1.0.0', mc = '', loader = 'none', loaderVer = '';
-    $('#d-src').textContent = isMr ? 'Modrinth pack' : 'Instance zip';
-    $('#d-skipwrap').hidden = isMr;
-    $('#d-found').textContent = src.file.name;
-    $('#d-detail').textContent = 'Each mod is matched to CurseForge by its file fingerprint. Matches go into manifest.json and modlist.html. Anything CurseForge does not know stays inside the pack as a bundled file.';
-    if (isMr) {
-      const ix = src.index, dep = ix.dependencies || {};
-      name = ix.name || name; version = ix.versionId || version; mc = dep.minecraft || '';
-      const lk = ['fabric-loader', 'quilt-loader', 'forge', 'neoforge'].find((k) => dep[k]);
-      if (lk) { loader = lk; loaderVer = dep[lk]; }
-    } else {
-      src.root = detectRoot(src.names);
-      const parent = src.root.replace(/[^/]*\/$/, '');
-      const uid = { 'net.fabricmc.fabric-loader': 'fabric-loader', 'org.quiltmc.quilt-loader': 'quilt-loader', 'net.minecraftforge': 'forge', 'net.neoforged': 'neoforge' };
-      const mmc = (await readJsonFrom(src, parent + 'mmc-pack.json')) || (await readJsonFrom(src, 'mmc-pack.json'));
-      if (mmc && Array.isArray(mmc.components)) mmc.components.forEach((c) => {
-        if (c.uid === 'net.minecraft') mc = c.version; else if (uid[c.uid]) { loader = uid[c.uid]; loaderVer = c.version; }
-      });
-    }
-    $('#d-name').value = name; $('#d-version').value = version; $('#d-mc').value = mc;
-    $('#d-loader').value = loader; $('#d-loaderver').value = loaderVer; syncLoaderD();
-    $('#d-nmc').textContent = mc || '?';
-    countsD();
-    if (!mc) showMsg('#d-note', 'The Minecraft and loader versions are not recorded in this file. Enter them below.', 'info'); else hide('#d-note');
-    $('#d-cf').hidden = false;
-    $('#d-pack').hidden = false;
-  }
-  $('#d-mc').addEventListener('input', () => { $('#d-nmc').textContent = $('#d-mc').value.trim() || '?'; });
-  $('#d-save').addEventListener('click', () => { if (D.blob) saveBlob(D.blob, D.outName); });
-  $('#d-cancel').addEventListener('click', () => { if (D.ctl) D.ctl.cancel(); });
-  $('#d-go').addEventListener('click', buildD);
-
-  async function buildD() {
-    const st = D, src = st.src;
-    if (st.busy || !src) return;
-    const name = $('#d-name').value.trim(), version = $('#d-version').value.trim() || '1.0.0', author = $('#d-author').value.trim() || 'Unknown';
-    const mc = $('#d-mc').value.trim(), loader = $('#d-loader').value, loaderVer = $('#d-loaderver').value.trim();
-    if (!name) return showMsg('#d-result', 'Enter a pack name.', 'err');
-    if (!mc) return showMsg('#d-result', 'Enter the Minecraft version, for example 1.20.1.', 'err');
-    if (loader !== 'none' && !loaderVer) return showMsg('#d-result', 'Enter the loader version, for example 0.15.7.', 'err');
-
-    st.ctl = newCtl(); const ctl = st.ctl;
-    hide('#d-result'); hide('#d-save'); st.blob = null;
-    const outName = slug(name) + '-' + slug(version) + '-curseforge.zip';
-    let sink = null;
-    setBusy('d', true);
-    try {
-      sink = await openSink(outName, 'zip');           // the save dialog needs the click, so it comes first
-      st.outName = outName;
-      const list = lists.d, rows = st.rows;
-      rows.forEach((r) => { r.state = ''; r.label = 'waiting'; r.size = r.size0; }); list.sched();
-      const matched = new Map(), byPath = new Map(), failed = [];
-      let bundled = 0, otherCount = 0, done = 0;
-      const total = rows.length;
-      const stepProg = () => setProgress('d', 0.06 + 0.8 * done / Math.max(total, 1), 'Matching ' + done + ' of ' + total + '…');
-
-      const matchBatch = async (batch) => {            // batch: [{ rel, bytes, row }]
-        batch.forEach((b) => { b.fp = cfFingerprint(b.bytes); });
-        const data = await cfApi('/v1/fingerprints', { fingerprints: [...new Set(batch.map((b) => b.fp))] });
-        const hits = new Map();
-        ((data && data.exactMatches) || []).forEach((m) => {
-          const f = m.file || {}, fp = Number(f.fileFingerprint);
-          if (f.id && !hits.has(fp)) hits.set(fp, { projectID: f.modId || m.id, fileID: f.id });
-        });
-        for (const b of batch) {
-          const h = hits.get(b.fp);
-          if (h) { matched.set(h.fileID, h); byPath.set(b.rel, h); b.row.state = 'ok'; b.row.label = 'matched'; }
-          else { sink.add('overrides/' + b.rel, b.bytes, true); bundled++; b.row.state = 'warn'; b.row.label = 'bundled'; b.row.size = 'bundled'; }
-          b.bytes = null;
-        }
-        await sink.drain(); list.sched();
-      };
-
-      if (src.kind === 'mrpack') {
-        const plan = planOverrides(src.names, 'all');
-        otherCount = plan.map.size;
-        setProgress('d', 0, 'Copying bundled files…');
-        await writeOverrides(sink, src, plan, ctl, (n, t) => setProgress('d', 0.05 * n / Math.max(t, 1), 'Copying bundled files… ' + n + ' of ' + t), 'overrides/');
-        for (const batch of batches(rows, (r) => r.f.fileSize || 0, 18, 40 * MB)) {
-          ctl.check();
-          const got = [];
-          await pool(batch, 6, async (row) => {
-            const path = safePath(row.f.path);
-            row.state = 'run'; row.label = 'loading'; list.sched();
-            try {
-              if (!path) throw new Error('unsafe path in index');
-              const bytes = await getBytes(row.f.downloads || [], ctl, (u8) => verifyHashes(u8, row.f.hashes || {}));
-              got.push({ rel: path, bytes, row });
-            } catch (e) {
-              if (e instanceof Cancelled || ctl.aborted) throw new Cancelled();
-              failed.push({ path: path || row.path, reason: describeError(e), urls: row.f.downloads || [] });
-              row.state = 'bad'; row.label = 'failed';
-            }
-          }, ctl);
-          if (got.length) await matchBatch(got);
-          done += batch.length; stepProg();
-        }
-      } else {
-        const c = collectInst(src, $('#d-skip').checked);
-        const rest = c.items.filter((it) => !it.lookup);
-        otherCount = rest.length;
-        let n = 0;
-        for (const batch of batches(rest, (it) => src.sizes.get(it.full))) {
-          ctl.check();
-          const data = await extract(src.u8, batch.map((it) => it.full));
-          for (const it of batch) sink.add('overrides/' + it.rel, data[it.full], STORE_RE.test(it.rel));
-          await sink.drain(); n += batch.length;
-          setProgress('d', 0.05 * n / Math.max(rest.length, 1), 'Bundling ' + n + ' of ' + rest.length + ' files…');
-        }
-        for (const batch of batches(rows, (r) => src.sizes.get(r.it.full))) {
-          ctl.check();
-          const data = await extract(src.u8, batch.map((r) => r.it.full));
-          await matchBatch(batch.map((r) => ({ rel: r.it.rel, bytes: data[r.it.full], row: r })));
-          done += batch.length; stepProg();
-        }
-      }
-
-      setProgress('d', 0.9, 'Reading project details…');
-      const ids = [...new Set([...matched.values()].map((h) => h.projectID))];
-      const projects = new Map();
-      for (let i = 0; i < ids.length; i += 100) {
-        ctl.check();
-        (await cfApi('/v1/mods', { modIds: ids.slice(i, i + 100) })).forEach((p) => projects.set(p.id, p));
-      }
-      rows.forEach((r) => {
-        const h = byPath.get(r.f ? safePath(r.f.path) : r.it.rel), p = h && projects.get(h.projectID);
-        if (p) r.size = p.name;
-      });
-      list.sched();
-
-      const manifest = {
-        minecraft: { version: mc, modLoaders: loader === 'none' ? [] : [{ id: CF_LOADER_ID[loader] + '-' + loaderVer, primary: true }] },
-        manifestType: 'minecraftModpack', manifestVersion: 1, name, version, author,
-        files: [...matched.values()].map((h) => ({ projectID: h.projectID, fileID: h.fileID, required: true })),
-        overrides: 'overrides'
-      };
-      sink.add('manifest.json', fflate.strToU8(JSON.stringify(manifest, null, 2)), false);
-      const li = [...projects.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' })).map((p) => {
-        const url = p.links && /^https:\/\//.test(p.links.websiteUrl || '') ? p.links.websiteUrl : 'https://www.curseforge.com/projects/' + p.id;
-        const by = p.authors && p.authors[0] && p.authors[0].name ? ' (by ' + p.authors[0].name + ')' : '';
-        return '<li><a href="' + escHtml(url) + '">' + escHtml(p.name + by) + '</a></li>';
-      });
-      sink.add('modlist.html', fflate.strToU8('<ul>\n' + li.join('\n') + '\n</ul>\n'), false);
-      if (failed.length) {
-        const lines = ['These files could not be downloaded and are missing from the pack.', ''];
-        failed.forEach((f) => lines.push(f.path + '\n  reason: ' + f.reason + '\n  urls: ' + (f.urls.join(', ') || 'none') + '\n'));
-        sink.add('DOWNLOAD_FAILED.txt', fflate.strToU8(lines.join('\n')), false);
-      }
-      setProgress('d', 0.97, 'Closing the pack…');
-      const out = await sink.finish();
-      setProgress('d', 1, 'Done');
-      const nMatched = rows.filter((r) => r.label === 'matched').length;
-      let text = nMatched + ' of ' + total + ' mods and packs matched on CurseForge.';
-      if (bundled) text += ' ' + bundled + ' were not found there and are bundled inside the pack instead.';
-      if (failed.length) text += ' ' + failed.length + ' could not be downloaded and are listed in DOWNLOAD_FAILED.txt.';
-      text += ' ' + otherCount + ' other files bundled.';
-      text += out.saved ? ' Pack saved where you chose.' : ' Pack size ' + fmtBytes(out.blob.size) + '.';
-      showMsg('#d-result', text, (bundled || failed.length) ? 'warn' : 'ok');
-      finishOutput('d', out, outName);
-      histAction(src, 'Made a CurseForge pack');
-    } catch (e) {
-      if (sink) await sink.abort();
-      if (e instanceof Cancelled) { showMsg('#d-result', 'Cancelled. Nothing was saved.', 'info'); hide('#d-progress'); }
-      else showMsg('#d-result', 'The build stopped. ' + describeError(e), 'err');
-    } finally { setBusy('d', false); }
-  }
-
-
-  // ================================================================== History (kept in this browser only)
-  const HIST_KEY = 'packshift.history.v1', HIST_MAX = 40, HIST_MODS_MAX = 2000;
-  const Hist = { items: [], volatile: false, open: new Set() };
-  const HIST_KIND = { mrpack: 'Modrinth pack', cf: 'CurseForge pack', instance: 'Instance zip' };
-  const HIST_LOADER = { 'fabric-loader': 'Fabric', 'quilt-loader': 'Quilt', forge: 'Forge', neoforge: 'NeoForge' };
-  try {
-    const raw = localStorage.getItem(HIST_KEY);
-    if (raw) { const a = JSON.parse(raw); if (Array.isArray(a)) Hist.items = a.filter((e) => e && typeof e.key === 'string' && Array.isArray(e.mods)); }
-  } catch (e) { Hist.volatile = true; }
-
-  function persistHist() {
-    for (let tries = 0; tries < 12; tries++) {
-      try { localStorage.setItem(HIST_KEY, JSON.stringify(Hist.items)); Hist.volatile = false; return; }
-      catch (e) {
-        if (!(e && (e.name === 'QuotaExceededError' || e.code === 22)) || Hist.items.length <= 1) { Hist.volatile = true; return; }
-        Hist.items.pop();                                  // out of room: drop the oldest pack and try again
-      }
-    }
-    Hist.volatile = true;
-  }
-  const baseOf = (p) => String(p || '').split('/').pop();
-  function histMeta(src) {
-    const stem = src.file.name.replace(/\.[^.]+$/, '');
-    if (src.kind === 'mrpack') {
-      const ix = src.index, d = ix.dependencies || {}, lk = Object.keys(HIST_LOADER).find((k) => d[k]);
-      return { name: ix.name || stem, version: ix.versionId || '', mc: d.minecraft || '', loader: lk ? HIST_LOADER[lk] + ' ' + d[lk] : '',
-        mods: ix.files.map((f) => ({ n: baseOf(f.path).replace(/\.(jar|zip)$/i, ''), f: baseOf(f.path), v: '' })) };
-    }
-    if (src.kind === 'cf') {
-      const m = src.manifest, l = cfLoader(m);
-      return { name: m.name || stem, version: m.version || '', mc: (m.minecraft && m.minecraft.version) || '', loader: l ? HIST_LOADER[l.key] + ' ' + l.version : '',
-        mods: m.files.map((f) => ({ n: 'CurseForge project ' + f.projectID, f: 'file ' + f.fileID, v: '' })) };
-    }
-    return { name: stem, version: '', mc: '', loader: '',
-      mods: src.names.filter((n) => /(^|\/)mods\/[^/]+\.jar$/i.test(n)).map((n) => ({ n: baseOf(n).replace(/\.jar$/i, ''), f: baseOf(n), v: '' })) };
-  }
-  const histKey = (src) => [src.kind, src.file.name, src.file.size, src.file.lastModified].join('|');
-  function histEntry(src) { const k = histKey(src); return Hist.items.find((e) => e.key === k); }
-  function histTouch(src) {
-    const meta = histMeta(src);
-    let e = histEntry(src);
-    if (e) Hist.items.splice(Hist.items.indexOf(e), 1);
-    else e = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), key: histKey(src), actions: [] };
-    const keepMods = e.namesKnown && e.mods && e.mods.length;
-    Object.assign(e, { ts: Date.now(), fileName: src.file.name, fileSize: src.file.size, kind: src.kind, name: meta.name, version: meta.version, mc: meta.mc, loader: meta.loader });
-    if (!keepMods) { e.mods = meta.mods.slice(0, HIST_MODS_MAX); e.namesKnown = false; }
-    e.count = meta.mods.length;
-    Hist.items.unshift(e);
-    if (Hist.items.length > HIST_MAX) Hist.items.length = HIST_MAX;
-    persistHist(); renderHistIfVisible();
-  }
-  function histSetMods(src, mods) {
-    const e = src && histEntry(src);
-    if (!e) return;
-    e.mods = mods.slice(0, HIST_MODS_MAX); e.namesKnown = true; e.count = mods.length;
-    persistHist(); renderHistIfVisible();
-  }
-  function histAction(src, label) {
-    const e = src && histEntry(src);
-    if (!e) return;
-    e.actions.unshift({ t: label, ts: Date.now() });
-    if (e.actions.length > 6) e.actions.length = 6;
-    persistHist(); renderHistIfVisible();
-  }
-  const renderHistIfVisible = () => { if (!$('#panel-h').hidden) renderHist(); };
-  const histWhen = (ts) => { try { return new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); } catch (e) { return new Date(ts).toISOString(); } };
-  const histLine = (m) => m.n + (m.f && m.f !== m.n ? '  ·  ' + m.f : '');
-
-  function histRows(e, q) {
-    return e.mods.filter((m) => !q || (m.n + ' ' + m.f + ' ' + m.v).toLowerCase().indexOf(q) !== -1)
-      .map((m) => ({ path: histLine(m), size: m.v || '', state: '', label: '' }));
-  }
-  function histCsvLines(entries) {
-    const head = ['pack', 'pack version', 'source', 'minecraft', 'loader', 'opened', 'mod', 'file', 'mod version'];
-    const lines = [head.join(',')];
-    entries.forEach((e) => e.mods.forEach((m) => lines.push([e.name, e.version, HIST_KIND[e.kind] || e.kind, e.mc, e.loader, new Date(e.ts).toISOString(), m.n, m.f, m.v].map(csvCell).join(','))));
-    return lines;
-  }
-  function histDetails(e, q) {
-    const det = el('details', 'hentry');
-    const sum = el('summary');
-    sum.appendChild(el('span', 'hname', e.name + (e.version ? '  v' + e.version : '')));
-    sum.appendChild(el('span', 'tag src', HIST_KIND[e.kind] || e.kind));
-    sum.appendChild(el('span', 'hmeta', e.count + ' mod' + (e.count === 1 ? '' : 's') + [e.mc && ' · Minecraft ' + e.mc, e.loader && ' · ' + e.loader].filter(Boolean).join('')));
-    sum.appendChild(el('span', 'hwhen', histWhen(e.ts)));
-    det.appendChild(sum);
-    const body = el('div', 'hbody');
-    det.appendChild(body);
-    let built = false;
-    const build = () => {
-      if (built) return; built = true;
-      body.appendChild(el('p', 'muted', e.fileName + ' (' + fmtBytes(e.fileSize || 0) + ')'));
-      if (!e.namesKnown && e.kind !== 'instance') body.appendChild(el('p', 'muted', e.kind === 'cf' ? 'Real mod names appear here after the pack has been looked up on CurseForge.' : 'File names only. Use Inspect a pack to add the real mod names.'));
-      if (e.actions && e.actions.length) body.appendChild(el('p', 'muted', e.actions.map((a) => a.t + ' (' + histWhen(a.ts) + ')').join('  ·  ')));
-      const rows = histRows(e, q);
-      const act = el('div', 'actions');
-      const mk = (label, fn) => { const b = el('button', 'btn ghost', label); b.type = 'button'; b.addEventListener('click', fn); act.appendChild(b); return b; };
-      mk('Copy mod list', async () => {
-        const text = e.mods.map(histLine).join('\n');
-        try { await navigator.clipboard.writeText(text); } catch (err) { saveBlob(new Blob([text], { type: 'text/plain' }), slug(e.name) + '-mods.txt'); }
-      });
-      mk('Save as .csv', () => saveBlob(new Blob(['﻿' + histCsvLines([e]).join('\r\n')], { type: 'text/csv' }), slug(e.name) + '-mods.csv'));
-      mk('Remove from history', () => { Hist.items = Hist.items.filter((x) => x !== e); Hist.open.delete(e.id); persistHist(); renderHist(); });
-      body.appendChild(act);
-      if (q) body.appendChild(el('p', 'muted', rows.length + ' of ' + e.mods.length + ' mods match the search.'));
-      const host = el('div', 'vlist'); host.setAttribute('role', 'list'); host.setAttribute('aria-label', 'Mods in ' + e.name);
-      body.appendChild(host);
-      new VList(host).set(rows);
-    };
-    det.addEventListener('toggle', () => { if (det.open) { Hist.open.add(e.id); build(); } else Hist.open.delete(e.id); });
-    if (Hist.open.has(e.id)) { det.open = true; build(); }
-    return det;
-  }
-  function renderHist() {
-    const q = $('#h-q').value.trim().toLowerCase();
-    const shown = Hist.items.filter((e) => !q || (e.name + ' ' + e.fileName).toLowerCase().indexOf(q) !== -1 || e.mods.some((m) => (m.n + ' ' + m.f).toLowerCase().indexOf(q) !== -1));
-    $('#h-count').textContent = Hist.items.length + ' pack' + (Hist.items.length === 1 ? '' : 's');
-    $('#h-empty').hidden = Hist.items.length > 0;
-    $('#h-none').hidden = !(Hist.items.length && !shown.length);
-    $('#h-volatile').hidden = !Hist.volatile;
-    const host = $('#h-list'); host.textContent = '';
-    shown.forEach((e) => host.appendChild(histDetails(e, q)));
-  }
-  $('#h-q').addEventListener('input', renderHist);
-  $('#h-csv').addEventListener('click', () => {
-    if (!Hist.items.length) return;
-    saveBlob(new Blob(['﻿' + histCsvLines(Hist.items).join('\r\n')], { type: 'text/csv' }), 'packshift-history.csv');
-  });
-  let clearArmed = 0;
-  $('#h-clear').addEventListener('click', () => {
-    const b = $('#h-clear');
-    if (!Hist.items.length) return;
-    if (!clearArmed) {                                      // two clicks, because the page cannot show a confirm dialog
-      b.textContent = 'Click again to clear everything';
-      clearArmed = setTimeout(() => { clearArmed = 0; b.textContent = 'Clear history'; }, 4000);
-      return;
-    }
-    clearTimeout(clearArmed); clearArmed = 0; b.textContent = 'Clear history';
-    Hist.items = []; Hist.open.clear(); persistHist(); renderHist();
-  });
-  renderHist();
-
   // expose for tests
-  window.__packshift = { safePath, planOverrides, batches, cfLoader, cfFingerprint };
+  window.__packshift = { safePath, planOverrides, batches, cfLoader };
 })();
 </script>
 </body>
