@@ -207,6 +207,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   <main>
     <!-- to .zip -->
     <section class="panel" id="panel-a" role="tabpanel" aria-labelledby="tab-a">
+      <div class="srcpick" role="radiogroup" aria-label="Type of pack">
+        <label class="check"><input type="radio" name="a-srctype" id="a-src-mr" value="mr" checked> Modrinth pack (.mrpack)</label>
+        <label class="check"><input type="radio" name="a-srctype" id="a-src-cf" value="cf"> CurseForge pack (.zip)</label>
+      </div>
       <label class="drop" id="a-drop" for="a-file">
         <input type="file" id="a-file" accept=".mrpack,.zip">
         <strong id="a-drop-title">Drop a .mrpack here</strong>
@@ -897,12 +901,14 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
   // ================================================================== TAB A: to .zip
   function setSrcA(v) {
+    $('#a-src-' + v).checked = true;
     $('#a-file').accept = v === 'cf' ? '.zip' : '.mrpack,.zip';
     $('#a-drop-title').textContent = v === 'cf' ? 'Drop your CurseForge pack here' : 'Drop a .mrpack here';
     $('#a-drop-sub').textContent = v === 'cf'
       ? 'the zip CurseForge exports, with manifest.json, overrides and modlist.html. Every mod is downloaded and added.'
       : 'or click to choose a file. The mods are downloaded and added to the zip.';
   }
+  document.querySelectorAll('input[name="a-srctype"]').forEach((r) => r.addEventListener('change', () => setSrcA(r.value)));
 
   wireDrop($('#a-drop'), $('#a-file'), async (file) => {
     const st = S.a;
