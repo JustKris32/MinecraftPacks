@@ -439,7 +439,12 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   // Visitors never see the relay or CurseForge key settings. Open the page with #setup on the end of the address to show them.
   const LEAN = location.hash !== '#setup';
   if (LEAN) document.documentElement.classList.add('lean');
-  const NO_CF = 'CurseForge lookups are not available right now. Please try again later.';
+  // Says why CurseForge is unavailable without revealing anything private (no keys, no addresses).
+  function noCf() {
+    if (!Net.helper) return 'The download relay cannot be reached, so CurseForge is unavailable. If this is your site, check the relay address and that ALLOWED_ORIGINS matches this page.';
+    if (Net.cfStatus === 'rejected') return 'CurseForge rejected the relay\'s API key. The site owner needs to replace the CF_API_KEY secret.';
+    return 'The relay has no CurseForge API key set. The site owner needs to add the CF_API_KEY secret to the worker and redeploy it.';
+  }
   const MB = 1024 * 1024;
 
   function fmtBytes(n) {
@@ -711,7 +716,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       add(path, data, store) {
         if (error) throw error;
         const f = (store || data.length < 128) ? new fflate.ZipPassThrough(path)
-          : (WORKERS ? new fflate.AsyncZipDeflate(path, { level: 6 }) : new fflate.ZipDeflate(path, { level: 6 }));
+          : (WORKERS ? new fflate.AsyncZipDeflate(path, { level: 4 }) : new fflate.ZipDeflate(path, { level: 4 }));
         zip.add(f); f.push(data, true);
       },
       async drain() {
@@ -732,18 +737,18 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   }
 
   // ------------------------------------------------------------------ network
-  const Net = { helper: false, base: '', relayKey: false, viaProxy: {}, onBytes: null };
+  const Net = { helper: false, base: '', relayKey: false, cfStatus: '', viaProxy: {}, onBytes: null };
   async function pingBase(base) {
     try {
       const r = await fetch(base + '/__packshift/ping', { cache: 'no-store' });
       if (!r.ok) return false;
       const j = await r.json();
-      if (j && j.packshift) { Net.relayKey = !!j.cfKey; return true; }
+      if (j && j.packshift) { Net.relayKey = !!j.cfKey; Net.cfStatus = j.cfStatus || (j.cfKey ? 'ok' : 'missing'); return true; }
       return false;
     } catch (e) { return false; }
   }
   async function detectHelper() {
-    Net.helper = false; Net.base = ''; Net.relayKey = false; Net.viaProxy = {};
+    Net.helper = false; Net.base = ''; Net.relayKey = false; Net.cfStatus = ''; Net.viaProxy = {};
     if (/^https?:$/.test(location.protocol) && await pingBase('')) Net.helper = true;
     else {
       const relay = String(S.relay || DEFAULT_RELAY).trim().replace(/\/+$/, '');
@@ -903,14 +908,15 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
   async function cfApi(path, body) {
     const key = S.key.trim();
-    if (!key && !(Net.helper && Net.relayKey)) throw new Error(LEAN ? NO_CF : 'Enter your CurseForge API key first.');
+    if (!key && !(Net.helper && Net.relayKey)) throw new Error(LEAN ? noCf() : 'Enter your CurseForge API key first.');
     if (key && !/^[\x21-\x7e]+$/.test(key)) throw new Error('The CurseForge API key has characters that are not allowed. Paste it again.');
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
     if (key) headers[Net.helper ? 'x-cf-key' : 'x-api-key'] = key;
     let res;
     try { res = await fetch((Net.helper ? Net.base + '/__packshift/cf' : 'https://api.curseforge.com') + path, { method: 'POST', headers, body: JSON.stringify(body) }); }
-    catch (e) { throw new Error(LEAN ? NO_CF : (Net.helper ? 'Could not reach CurseForge.' : 'The browser blocked the request to CurseForge. Run the helper or add a relay in Relay settings.')); }
-    if (res.status === 401 || res.status === 403) throw new Error(LEAN ? NO_CF : 'CurseForge rejected the API key.');
+    catch (e) { throw new Error(LEAN ? noCf() : (Net.helper ? 'Could not reach CurseForge.' : 'The browser blocked the request to CurseForge. Run the helper or add a relay in Relay settings.')); }
+    if (!key && res.status === 502 && Net.helper) { Net.cfStatus = 'rejected'; Net.relayKey = false; paintHelpers(); throw new Error(noCf()); }
+    if (res.status === 401 || res.status === 403) throw new Error(LEAN ? 'CurseForge rejected the API key.' : 'CurseForge rejected the API key.');
     if (!res.ok) throw new Error('CurseForge answered with HTTP ' + res.status + '.');
     return (await res.json()).data || [];
   }
@@ -922,11 +928,11 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   async function cfSides(items, ctl) {
     const withHash = items.filter((it) => !it.missing && it.sha1);
     try {
-      const found = {};
-      for (let i = 0; i < withHash.length; i += 200) {
-        ctl.check();
-        Object.assign(found, await mrApi('/version_files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hashes: withHash.slice(i, i + 200).map((it) => it.sha1.toLowerCase()), algorithm: 'sha1' }) }));
-      }
+      const found = {}, parts = [];
+      for (let i = 0; i < withHash.length; i += 200) parts.push(withHash.slice(i, i + 200));
+      await pool(parts, 3, async (part) => {
+        Object.assign(found, await mrApi('/version_files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hashes: part.map((it) => it.sha1.toLowerCase()), algorithm: 'sha1' }) }));
+      }, ctl);
       const projects = await mrProjects([...new Set(Object.keys(found).map((h) => found[h].project_id))]);
       withHash.forEach((it) => {
         const v = found[it.sha1.toLowerCase()], p = v && projects[v.project_id];
@@ -946,14 +952,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const fileIds = manifest.files.map((f) => f.fileID);
     const modIds = [...new Set(manifest.files.map((f) => f.projectID))];
     const fileMap = new Map(), projMap = new Map();
-    for (let i = 0; i < fileIds.length; i += 100) {
-      ctl.check();
-      (await cfApi('/v1/mods/files', { fileIds: fileIds.slice(i, i + 100) })).forEach((d) => fileMap.set(d.id, d));
-    }
-    for (let i = 0; i < modIds.length; i += 100) {
-      ctl.check();
-      (await cfApi('/v1/mods', { modIds: modIds.slice(i, i + 100) })).forEach((p) => projMap.set(p.id, p));
-    }
+    const jobs = [];
+    for (let i = 0; i < fileIds.length; i += 100) { const part = fileIds.slice(i, i + 100); jobs.push(async () => (await cfApi('/v1/mods/files', { fileIds: part })).forEach((d) => fileMap.set(d.id, d))); }
+    for (let i = 0; i < modIds.length; i += 100) { const part = modIds.slice(i, i + 100); jobs.push(async () => (await cfApi('/v1/mods', { modIds: part })).forEach((p) => projMap.set(p.id, p))); }
+    await pool(jobs, 4, (job) => job(), ctl);       // lookups run side by side instead of one after another
     const items = manifest.files.map((f) => {
       const d = fileMap.get(f.fileID), p = projMap.get(f.projectID) || {};
       const out = { projectID: f.projectID, fileID: f.fileID, name: p.name || ('Project ' + f.projectID), missing: !d, site: 'https://www.curseforge.com/projects/' + f.projectID };
@@ -965,7 +967,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       out.size = d.fileLength || 0;
       out.sha1 = sha1 ? sha1.value : '';
       const enc = encodeURIComponent(d.fileName);
-      out.urls = [d.downloadUrl, 'https://edge.forgecdn.net/files/' + dir + '/' + rest + '/' + enc, 'https://mediafilez.forgecdn.net/files/' + dir + '/' + rest + '/' + enc].filter(Boolean);
+      out.urls = [...new Set([d.downloadUrl, 'https://edge.forgecdn.net/files/' + dir + '/' + rest + '/' + enc, 'https://mediafilez.forgecdn.net/files/' + dir + '/' + rest + '/' + enc].filter(Boolean))];
       out.path = out.folder + '/' + out.fileName;
       out.display = d.displayName || d.fileName;
       out.date = String(d.fileDate || '').slice(0, 10);
@@ -1177,7 +1179,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       if (tok !== st.tok) return;
       if (!((Net.helper && Net.relayKey) || S.key.trim())) {
         const listed = await showListedA(src, tok);
-        if (tok === st.tok) showMsg('#a-note', listed ? 'Names come from modlist.html in the zip, and sides are matched by name on Modrinth where it has the mod. ' + (LEAN ? NO_CF : 'Add a helper or relay and a CurseForge key (see Relay settings) for exact files and sizes.') : (LEAN ? NO_CF : 'Mod names need a helper or relay and a CurseForge key. See Relay settings.'), 'warn');
+        if (tok === st.tok) showMsg('#a-note', listed ? 'Names come from modlist.html in the zip, and sides are matched by name on Modrinth where it has the mod. ' + (LEAN ? noCf() : 'Add a helper or relay and a CurseForge key (see Relay settings) for exact files and sizes.') : (LEAN ? noCf() : 'Mod names need a helper or relay and a CurseForge key. See Relay settings.'), 'warn');
         return;
       }
       showMsg('#a-note', 'Looking up the ' + src.manifest.files.length + ' mods on CurseForge…', 'info');
@@ -1326,8 +1328,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       const paint = () => setProgress('a', 0.1 + 0.87 * done / Math.max(total, 1), 'Downloading ' + done + ' of ' + total + '… ' + fmtBytes(okBytes + Math.max(inflight, 0)));
       const step = () => { done++; paint(); };
       Net.onBytes = (d) => { inflight += d; paint(); };
-      const budget = new ByteBudget(160 * MB);
-      await pool(rows, 6, async (row) => {
+      const budget = new ByteBudget(256 * MB);
+      await pool(rows, 10, async (row) => {
         const path = isCf ? (row.it && row.it.path) : safePath(row.f.path);
         if (path && written.has(path)) { row.state = 'warn'; row.label = 'bundled'; list.sched(); step(); return; }
         const hold = await budget.take(Math.max(4 * MB, (isCf ? (row.it && row.it.size) : row.f.fileSize) || 0));
@@ -1541,7 +1543,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     if (!name) return showMsg('#b-result', 'Enter a pack name.', 'err');
     if (!mc) return showMsg('#b-result', 'Enter the Minecraft version, for example 1.20.1.', 'err');
     if (loader !== 'none' && !loaderVer) return showMsg('#b-result', 'Enter the loader version, for example 0.15.7.', 'err');
-    if (src.kind === 'cf' && !S.key.trim() && !(Net.helper && Net.relayKey)) return showMsg('#b-result', LEAN ? NO_CF : 'Enter your CurseForge API key first.', 'err');
+    if (src.kind === 'cf' && !S.key.trim() && !(Net.helper && Net.relayKey)) return showMsg('#b-result', LEAN ? noCf() : 'Enter your CurseForge API key first.', 'err');
 
     st.ctl = newCtl(); const ctl = st.ctl;
     hide('#b-result'); hide('#b-save'); st.blob = null;
@@ -1596,7 +1598,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
         for (const batch of batches(st.rows, (r) => r.it.size, 18, 40 * MB)) {
           ctl.check();
           const got = [];
-          await pool(batch, 6, async (row) => {
+          await pool(batch, 10, async (row) => {
             row.state = 'run'; row.label = 'loading'; list.sched();
             try { got.push({ rel: row.it.path, bytes: await cfDownload(row.it, ctl), row }); }
             catch (e) {
@@ -1792,7 +1794,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   }
   async function lookupCf(tok) {
     const m = C.src.manifest;
-    if (!(Net.helper && (S.key.trim() || Net.relayKey))) return showMsg('#c-note', LEAN ? NO_CF : 'Connect a helper or relay and enter a CurseForge key first.', 'warn');
+    if (!(Net.helper && (S.key.trim() || Net.relayKey))) return showMsg('#c-note', LEAN ? noCf() : 'Connect a helper or relay and enter a CurseForge key first.', 'warn');
     $('#c-lookup').disabled = true;
     $('#c-count').textContent = 'Asking CurseForge about ' + m.files.length + ' files…';
     try {
