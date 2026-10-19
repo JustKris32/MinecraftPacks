@@ -116,6 +116,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   background: var(--panel); border: 1px solid var(--line); padding: 9px 10px; min-width: 0; width: 100%; border-radius: 0;
 }
 .field input:disabled { opacity: 0.5; }
+.types { border: 1px solid var(--line); background: var(--panel); margin: 0; padding: 10px 14px 12px; display: flex; flex-wrap: wrap; gap: 8px 22px; min-width: 0; }
+.types legend { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 600; padding: 0 6px; }
 .check { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.92rem; }
 .check input { width: 16px; height: 16px; accent-color: var(--accent); }
 .cf { border: 1px solid var(--line); background: var(--panel); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
@@ -267,6 +269,14 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
           </div>
           <label class="check"><input type="checkbox" id="a-keepindex"> <span id="a-keeplabel">Keep modrinth.index.json in the zip</span></label>
         </div>
+        <fieldset class="types" id="a-types">
+          <legend>Download these kinds of files</legend>
+          <label class="check"><input type="checkbox" data-kind="mod" checked> Mods</label>
+          <label class="check"><input type="checkbox" data-kind="resource pack" checked> Resource packs</label>
+          <label class="check"><input type="checkbox" data-kind="shader" checked> Shaders</label>
+          <label class="check"><input type="checkbox" data-kind="datapack" checked> Data packs</label>
+        </fieldset>
+        <p class="muted" id="a-filternote">Client only skips mods that only run on a server, and Server only skips client-only mods, resource packs and shaders. Files whose side is not known are always kept, so nothing needed is left out.</p>
 
         <div class="actions">
           <button type="button" class="btn" id="a-go">Download mods and build zip</button>
@@ -1128,7 +1138,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
   function paintListA() {
     const st = S.a, v = $('#a-side').value || 'all';
-    const base = st.listShown ? (st.listRows || []) : st.rows;       // the names from modlist.html count while they are on screen
+    const base = st.listShown ? (st.listRows || []) : st.rows.filter(keepRowA);       // the names from modlist.html count while they are on screen
     fillSides('a', base);
     $('#a-sidebar').hidden = !base.length;
     const shown = base.filter((r) => sideMatch(r, v));
@@ -1145,10 +1155,43 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       if (!rows[i]) return;
       Object.assign(rows[i], { path: it.missing ? it.name + '  ·  file ' + it.fileID + ' (no longer listed)' : it.name + '  ·  ' + it.fileName, size: fmtBytes(it.size || 0), side: it.side, it });
       if (it.missing) { rows[i].state = 'bad'; rows[i].label = 'missing'; }
-      total += it.size || 0;
     });
-    $('#a-size').textContent = fmtBytes(total);
-    checkBig('a', total + st.src.file.size);
+    refreshA();
+  }
+
+  // Which rows the current choices keep. Anything whose kind or side is not known yet is kept.
+  function kindOfRowA(r) {
+    if (r.it) return r.it.kind || 'mod';
+    const p = r.f && typeof r.f.path === 'string' ? r.f.path : '';
+    if (!p) return 'unknown';
+    return /^resourcepacks\//.test(p) ? 'resource pack' : /^shaderpacks\//.test(p) ? 'shader' : /^datapacks\//.test(p) ? 'datapack' : /^mods\//.test(p) ? 'mod' : 'other';
+  }
+  function typesA() {
+    const t = {};
+    document.querySelectorAll('#a-types input').forEach((c) => { t[c.dataset.kind] = c.checked; });
+    return t;
+  }
+  function keepRowA(r) {
+    const k = kindOfRowA(r);
+    if (k !== 'other' && k !== 'unknown' && typesA()[k] === false) return false;
+    const tg = $('#a-target').value, sd = r.side || 'unknown';
+    if (tg === 'client' && sd === 'server') return false;
+    if (tg === 'server' && sd === 'client') return false;
+    return true;
+  }
+  function refreshA() {
+    const st = S.a, src = st.src;
+    if (!src) return;
+    const keep = st.rows.filter(keepRowA);
+    let total = 0, known = true;
+    keep.forEach((r) => {
+      const sz = r.it ? r.it.size : (src.kind === 'cf' ? undefined : r.f.fileSize);
+      if (sz === undefined) known = false; else total += sz || 0;
+    });
+    $('#a-nfiles').textContent = String(keep.length);
+    $('#a-size').textContent = known ? fmtBytes(total) : '—';
+    checkBig('a', (known ? total : 0) + src.file.size);
+    $('#a-nover').textContent = String(src.kind === 'cf' ? planOverrides(src.names, 'all', [cfOverrideRoot(src)]).map.size : planOverrides(src.names, $('#a-target').value).map.size);
     st.listShown = false;
     paintListA();
   }
@@ -1241,7 +1284,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     }
     $('#a-cf').hidden = !isCf;
     if (isCf && !Net.helper) $('#relay').open = true;
-    $('#a-target-wrap').hidden = isCf;
+    $('#a-target-wrap').hidden = false;
     $('#a-keeplabel').textContent = isCf ? 'Keep manifest.json in the zip' : 'Keep modrinth.index.json in the zip';
     $('#a-go').textContent = 'Download mods and build zip';
     buildRowsA();
@@ -1251,27 +1294,19 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const st = S.a, src = st.src;
     if (src.kind === 'cf') {
       st.rows = src.manifest.files.map((f) => ({ path: 'CurseForge project ' + f.projectID + ' · file ' + f.fileID, size: '', state: '', label: 'ready', side: 'unknown', f }));
-      $('#a-nfiles').textContent = String(st.rows.length);
-      $('#a-size').textContent = '—';
-      checkBig('a', src.file.size);
-      $('#a-nover').textContent = String(planOverrides(src.names, 'all', [cfOverrideRoot(src)]).map.size);
     } else {
-      const files = selectFiles(src.index.files, $('#a-target').value);
-      let total = 0;
-      st.rows = files.map((f) => { total += f.fileSize || 0; const env = f.env || {}; return { path: f.path || '(no path)', size: fmtBytes(f.fileSize || 0), state: '', label: 'ready', side: sideFrom(env.client, env.server), f }; });
-      $('#a-nfiles').textContent = String(files.length);
-      $('#a-size').textContent = fmtBytes(total);
-      checkBig('a', total + src.file.size);
-      $('#a-nover').textContent = String(planOverrides(src.names, $('#a-target').value).map.size);
+      st.rows = src.index.files.map((f) => { const env = f.env || {}; return { path: f.path || '(no path)', size: fmtBytes(f.fileSize || 0), state: '', label: 'ready', side: sideFrom(env.client, env.server), f }; });
     }
-    st.listShown = false;
-    paintListA();
+    refreshA();
   }
-  $('#a-target').addEventListener('change', () => {
+  // Changing the choices only re-filters the rows. It never throws away what CurseForge already told us.
+  function filtersChanged() {
     if (S.a.busy || !S.a.src) return;
     S.a.blob = null; hide('#a-save'); hide('#a-result'); hide('#a-progress');
-    buildRowsA();
-  });
+    refreshA();
+  }
+  $('#a-target').addEventListener('change', filtersChanged);
+  document.querySelectorAll('#a-types input').forEach((c) => c.addEventListener('change', filtersChanged));
   $('#a-save').addEventListener('click', () => { if (S.a.blob) saveBlob(S.a.blob, S.a.outName); });
   $('#a-cancel').addEventListener('click', () => { if (S.a.ctl) S.a.ctl.cancel(); });
   $('#a-go').addEventListener('click', buildA);
@@ -1289,14 +1324,19 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     return new Set(plan.map.keys());
   }
 
+  function typeSuffixA() {
+    const t = typesA(), names = { mod: 'mods', 'resource pack': 'resourcepacks', shader: 'shaders', datapack: 'datapacks' };
+    const on = Object.keys(names).filter((k) => t[k]);
+    return on.length === 4 || !on.length ? '' : '-' + on.map((k) => names[k]).join('+');
+  }
   async function buildA() {
     const st = S.a, src = st.src;
     if (st.busy || !src) return;
     const isCf = src.kind === 'cf';
-    const target = isCf ? 'all' : $('#a-target').value;
+    const target = $('#a-target').value;
     const meta = isCf ? src.manifest : src.index;
     const ver = isCf ? meta.version : meta.versionId;
-    const outName = slug(meta.name || src.file.name.replace(/\.[^.]+$/, '')) + (ver ? '-' + slug(ver) : '') + (target !== 'all' ? '-' + target : '') + '.zip';
+    const outName = slug(meta.name || src.file.name.replace(/\.[^.]+$/, '')) + (ver ? '-' + slug(ver) : '') + (target !== 'all' ? '-' + target : '') + typeSuffixA() + '.zip';
     st.ctl = newCtl(); const ctl = st.ctl;
     hide('#a-result'); hide('#a-save'); st.blob = null;
     let sink = null;
@@ -1304,7 +1344,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     try {
       sink = await openSink(outName, 'zip');           // must run first: the save dialog needs the click
       st.outName = outName;
-      const rows = st.rows;
+      if (!Object.values(typesA()).some(Boolean)) throw new Error('Tick at least one kind of file to download.');
+      let rows = st.rows.filter(keepRowA);
       rows.forEach((r) => { r.state = ''; r.label = 'waiting'; });
       st.listShown = false; paintListA();
       const failed = [];
@@ -1316,10 +1357,11 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       written = await writeOverrides(sink, src, plan, ctl, (n, t) => setProgress('a', 0.08 * n / Math.max(t, 1), 'Copying bundled files… ' + n + ' of ' + t));
 
       if (isCf) {
-        setProgress('a', 0.08, 'Asking CurseForge about ' + rows.length + ' files…');
+        setProgress('a', 0.08, 'Asking CurseForge about ' + st.rows.length + ' files…');
         const resolved = st.resolved || await cfResolve(src.manifest, ctl);
         st.resolved = resolved;
         applyResolvedA(resolved);
+        rows = st.rows.filter(keepRowA);              // now the real kinds and sides are known
         rows.forEach((r) => { r.state = r.it && r.it.missing ? 'bad' : ''; r.label = r.it && r.it.missing ? 'missing' : 'waiting'; });
       }
       const list = lists.a;
