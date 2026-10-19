@@ -401,7 +401,10 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       <div class="card">
         <div class="pack-head"><h2>History</h2><span class="tag" id="h-count">0 packs</span></div>
         <p class="muted">The packs you opened here and the mods inside each one. It is kept in this browser on this device. Nothing is uploaded, and no one else can see it.</p>
-        <div class="field"><label for="h-q">Search packs and mods</label><input type="text" id="h-q" placeholder="Type part of a pack or mod name" autocomplete="off"></div>
+        <div class="toolbar">
+          <div class="field"><label for="h-q">Search packs and mods</label><input type="text" id="h-q" placeholder="Type part of a pack or mod name" autocomplete="off"></div>
+          <div class="field small"><label for="h-side">Side</label><select id="h-side"></select></div>
+        </div>
         <div class="actions">
           <button type="button" class="btn ghost" id="h-csv">Save everything (.csv)</button>
           <button type="button" class="btn ghost" id="h-clear">Clear history</button>
@@ -844,6 +847,27 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     return out;
   }
 
+  // modlist.html has names and CurseForge links but no IDs. Modrinth accepts slugs, and many mods share a slug on both sites,
+  // so ask Modrinth for those and trust a hit only when the titles also agree. Anything else stays "not known".
+  async function modrinthSidesByName(listed) {
+    const slugOf = (u) => { try { const p = new URL(u, 'https://www.curseforge.com').pathname.split('/').filter(Boolean); return (p[p.length - 1] || '').toLowerCase(); } catch (e) { return ''; } };
+    const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const slugs = [...new Set(listed.map((x) => slugOf(x.url)).filter(Boolean))];
+    const bySlug = {};
+    try {
+      for (let i = 0; i < slugs.length; i += 100) {
+        const arr = await mrApi('/projects?ids=' + encodeURIComponent(JSON.stringify(slugs.slice(i, i + 100))));
+        arr.forEach((p) => { bySlug[String(p.slug).toLowerCase()] = p; });
+      }
+    } catch (e) { return listed.map(() => 'unknown'); }
+    return listed.map((x) => {
+      const p = bySlug[slugOf(x.url)];
+      if (!p) return 'unknown';
+      const a = norm(p.title), b = norm(x.name);
+      return a && b && (a === b || a.indexOf(b) !== -1 || b.indexOf(a) !== -1) ? sideFrom(p.client_side, p.server_side) : 'unknown';
+    });
+  }
+
   // ------------------------------------------------------------------ CurseForge
   const S = { key: '', a: { src: null, busy: false, rows: [], blob: null, outName: '' }, b: { src: null, busy: false, rows: [], blob: null, outName: '' } };
   S.relay = '';
@@ -1049,7 +1073,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   modes.forEach((k) => $('#tab-' + k).addEventListener('click', () => setMode(k)));
 
   const lists = { a: new VList($('#a-files')), b: new VList($('#b-files')), c: new VList($('#c-files')) };
-  ['a', 'b', 'c'].forEach((k) => fillSides(k, []));
+  ['a', 'b', 'c', 'h'].forEach((k) => fillSides(k, []));
   function setBusy(k, busy) {
     S[k].busy = busy;
     $('#' + k + '-go').disabled = busy;
@@ -1083,7 +1107,8 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   function resetA() {
     const st = S.a;
     ['#a-error', '#a-result', '#a-progress', '#a-pack', '#a-save', '#a-note', '#a-big'].forEach(hide);
-    st.blob = null; st.src = null; st.resolved = null; st.resolving = false; st.rows = []; st.listShown = false; st.tok = (st.tok || 0) + 1;
+    st.blob = null; st.src = null; st.resolved = null; st.resolving = false; st.rows = []; st.listShown = false; st.listRows = null; st.tok = (st.tok || 0) + 1;
+    $('#a-side').value = 'all';
   }
 
   wireDrop($('#a-drop'), $('#a-file'), async (file) => {
@@ -1101,13 +1126,13 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
 
   function paintListA() {
     const st = S.a, v = $('#a-side').value || 'all';
-    fillSides('a', st.rows);
-    $('#a-sidebar').hidden = !st.rows.length;
-    if (st.listShown) return;
-    const shown = st.rows.filter((r) => sideMatch(r, v));
+    const base = st.listShown ? (st.listRows || []) : st.rows;       // the names from modlist.html count while they are on screen
+    fillSides('a', base);
+    $('#a-sidebar').hidden = !base.length;
+    const shown = base.filter((r) => sideMatch(r, v));
     lists.a.sideView = v;
     lists.a.set(shown);
-    $('#a-sidecount').textContent = v === 'all' ? '' : shown.length + ' of ' + st.rows.length + ' files' + (shown.length ? '' : ' have this side.');
+    $('#a-sidecount').textContent = v === 'all' ? '' : shown.length + ' of ' + base.length + ' files' + (shown.length ? '' : ' have this side.');
   }
   $('#a-side').addEventListener('change', paintListA);
 
@@ -1134,9 +1159,13 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     try { listed = parseModlist(fflate.strFromU8((await extract(src.u8, [mlPath]))[mlPath])); } catch (e) { return false; }
     if (!listed.length || S.a.tok !== tok || S.a.busy) return false;
     listed.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-    S.a.listShown = true;
-    lists.a.sideView = '';
-    lists.a.set(listed.map((x) => ({ path: x.name + (x.author ? '  ·  by ' + x.author : ''), size: '', state: '', label: 'ready' })));
+    const rows = listed.map((x) => ({ path: x.name + (x.author ? '  ·  by ' + x.author : ''), size: '', state: '', label: 'ready', side: 'unknown' }));
+    S.a.listShown = true; S.a.listRows = rows;
+    paintListA();
+    const sides = await modrinthSidesByName(listed);               // fills the Client and Server filters without CurseForge
+    if (S.a.tok !== tok || !S.a.listShown) return true;
+    rows.forEach((r, i) => { r.side = sides[i]; });
+    paintListA();
     return true;
   }
   async function resolveA() {
@@ -1148,7 +1177,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       if (tok !== st.tok) return;
       if (!((Net.helper && Net.relayKey) || S.key.trim())) {
         const listed = await showListedA(src, tok);
-        if (tok === st.tok) showMsg('#a-note', listed ? 'Names come from modlist.html in the zip. ' + (LEAN ? NO_CF : 'Add a helper or relay and a CurseForge key (see Relay settings) for exact files and sizes.') : (LEAN ? NO_CF : 'Mod names need a helper or relay and a CurseForge key. See Relay settings.'), 'warn');
+        if (tok === st.tok) showMsg('#a-note', listed ? 'Names come from modlist.html in the zip, and sides are matched by name on Modrinth where it has the mod. ' + (LEAN ? NO_CF : 'Add a helper or relay and a CurseForge key (see Relay settings) for exact files and sizes.') : (LEAN ? NO_CF : 'Mod names need a helper or relay and a CurseForge key. See Relay settings.'), 'warn');
         return;
       }
       showMsg('#a-note', 'Looking up the ' + src.manifest.files.length + ' mods on CurseForge…', 'info');
@@ -1156,14 +1185,14 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
         const resolved = await cfResolve(src.manifest, newCtl());
         if (tok !== st.tok) return;
         st.resolved = resolved;
-        histSetMods(src, resolved.map((it) => ({ n: it.name, f: it.missing ? 'file ' + it.fileID + ' (no longer listed)' : it.fileName, v: '' })));
+        histSetMods(src, resolved.map((it) => ({ n: it.name, f: it.missing ? 'file ' + it.fileID + ' (no longer listed)' : it.fileName, v: '', s: it.side })));
         applyResolvedA(resolved);
         const gone = resolved.filter((it) => it.missing).length;
         if (gone) showMsg('#a-note', gone + ' of the mods are no longer listed on CurseForge and will be skipped.', 'warn'); else hide('#a-note');
       } catch (e) {
         if (tok !== st.tok) return;
         const listed = await showListedA(src, tok);
-        showMsg('#a-note', 'Could not look up exact files yet. ' + describeError(e) + (listed ? ' Names shown are from modlist.html.' : ' The list shows CurseForge IDs until the build.'), 'warn');
+        showMsg('#a-note', 'Could not look up exact files yet. ' + describeError(e) + (listed ? ' Names shown are from modlist.html, with sides matched by name on Modrinth.' : ' The list shows CurseForge IDs until the build.'), 'warn');
       }
     } finally { st.resolving = false; }
   }
@@ -1364,7 +1393,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   wireDrop($('#b-drop'), $('#b-file'), async (file) => {
     const st = S.b;
     if (st.busy) return;
-    hide('#b-error'); hide('#b-result'); hide('#b-progress'); hide('#b-note'); hide('#b-big'); hide('#b-pack'); hide('#b-save'); st.blob = null;
+    hide('#b-error'); hide('#b-result'); hide('#b-progress'); hide('#b-note'); hide('#b-big'); hide('#b-pack'); hide('#b-save'); st.blob = null; $('#b-side').value = 'all';
     let src;
     try { src = await readSource(file); } catch (e) { return showMsg('#b-error', describeError(e), 'err'); }
     if (src.kind === 'mrpack') return showMsg('#b-error', 'This is already an .mrpack. Use the .mrpack → .zip tab to unpack it.', 'err');
@@ -1744,14 +1773,20 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     const mlPath = src.names.find((n) => /(^|\/)modlist\.html$/i.test(n));
     let listed = [];
     if (mlPath) { try { listed = parseModlist(fflate.strFromU8((await extract(src.u8, [mlPath]))[mlPath])); } catch (e) { listed = []; } }
+    const made = listed.map((x) => ({ name: x.name, file: '', version: '', kind: 'mod', site: x.url, note: x.author ? 'by ' + x.author : '', flag: '', side: 'unknown' }));
     C.items = listed.length
-      ? listed.map((x) => ({ name: x.name, file: '', version: '', kind: 'mod', site: x.url, note: x.author ? 'by ' + x.author : '', flag: '', side: 'unknown' }))
+      ? made.slice()
       : m.files.map((f) => ({ name: 'CurseForge project ' + f.projectID, file: 'file ' + f.fileID, version: '', kind: 'mod', site: 'https://www.curseforge.com/projects/' + f.projectID, note: '', flag: '', side: 'unknown' }));
     sortItems(); refreshC();
     $('#c-cf').hidden = false;
     if (Net.helper && (S.key.trim() || Net.relayKey)) { await lookupCf(tok); return; }
     $('#c-lookup').hidden = false;
-    showMsg('#c-note', (listed.length ? 'Names come from modlist.html (' + listed.length + ' entries; the manifest lists ' + m.files.length + ' files).' : 'This zip has no modlist.html, so only CurseForge IDs are shown.') +
+    if (listed.length) modrinthSidesByName(listed).then((sides) => {      // keyless: match sides by name on Modrinth
+      if (tok !== C.token || !made.every((it) => C.items.includes(it))) return;
+      made.forEach((it, i) => { it.side = sides[i]; });
+      refreshC();
+    });
+    showMsg('#c-note', (listed.length ? 'Names come from modlist.html (' + listed.length + ' entries; the manifest lists ' + m.files.length + ' files), and sides are matched by name on Modrinth where it has the mod.' : 'This zip has no modlist.html, so only CurseForge IDs are shown.') +
       (LEAN ? ' Exact file names, versions and compatibility are not available right now.' : ' Exact file names, versions and compatibility need a helper or relay and a CurseForge key. Set them in Relay settings, then press Look up.'), 'info');
     if (!Net.helper) $('#relay').open = true;
   }
@@ -1772,7 +1807,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
           flag: flagFor(it.gv.filter((v) => /^\d+\.\d+/.test(v)), loaders, C.pack)
         };
       });
-      sortItems(); refreshC(); hide('#c-lookup'); histSetMods(C.src, C.items.map((it) => ({ n: it.name, f: it.file, v: it.version })));
+      sortItems(); refreshC(); hide('#c-lookup'); histSetMods(C.src, C.items.map((it) => ({ n: it.name, f: it.file, v: it.version, s: sideKey(it) })));
       showMsg('#c-note', 'Exact files and versions came from CurseForge. ' + flagSummary(), 'info');
     } catch (e) {
       if (tok === C.token) showMsg('#c-note', describeError(e), 'warn');
@@ -1812,7 +1847,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       it.flag = flagFor(v.game_versions || [], v.loaders || [], C.pack);
     });
     sortItems(); refreshC();
-    histSetMods(src, C.items.map((it) => ({ n: it.name, f: it.file, v: it.version })));
+    histSetMods(src, C.items.map((it) => ({ n: it.name, f: it.file, v: it.version, s: sideKey(it) })));
     showMsg('#c-note', 'Names and versions came from Modrinth for ' + Object.keys(found).length + ' of ' + hashes.length + ' files. ' + flagSummary(), 'info');
   }
 
@@ -1862,7 +1897,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     }
     C.items.forEach((it) => { if (it.loader) it.flag = flagFor([], [it.loader], C.pack); });
     sortItems(); refreshC();
-    histSetMods(src, C.items.map((it) => ({ n: it.name, f: it.file, v: it.version })));
+    histSetMods(src, C.items.map((it) => ({ n: it.name, f: it.file, v: it.version, s: sideKey(it) })));
     const kinds = Object.keys(counts).map((k) => counts[k] + ' ' + LOADER_LABEL[k]).join(', ');
     showMsg('#c-note', (kinds ? 'Mod metadata read from the jars: ' + kinds + '. ' : 'No mod metadata found in the jars. ') + (mc ? '' : 'The Minecraft version is not recorded in this zip. ') + flagSummary(), 'info');
   }
@@ -1910,7 +1945,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
     if (src.kind === 'mrpack') {
       const ix = src.index, d = ix.dependencies || {}, lk = Object.keys(HIST_LOADER).find((k) => d[k]);
       return { name: ix.name || stem, version: ix.versionId || '', mc: d.minecraft || '', loader: lk ? HIST_LOADER[lk] + ' ' + d[lk] : '',
-        mods: ix.files.map((f) => ({ n: baseOf(f.path).replace(/\.(jar|zip)$/i, ''), f: baseOf(f.path), v: '' })) };
+        mods: ix.files.map((f) => ({ n: baseOf(f.path).replace(/\.(jar|zip)$/i, ''), f: baseOf(f.path), v: '', s: f.env ? sideFrom(f.env.client, f.env.server) : 'unknown' })) };
     }
     if (src.kind === 'cf') {
       const m = src.manifest, l = cfLoader(m);
@@ -1952,17 +1987,18 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
   const histWhen = (ts) => { try { return new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); } catch (e) { return new Date(ts).toISOString(); } };
   const histLine = (m) => m.n + (m.f && m.f !== m.n ? '  ·  ' + m.f : '');
 
-  function histRows(e, q) {
-    return e.mods.filter((m) => !q || (m.n + ' ' + m.f + ' ' + m.v).toLowerCase().indexOf(q) !== -1)
-      .map((m) => ({ path: histLine(m), size: m.v || '', state: '', label: '' }));
+  const histSide = (m) => ({ side: m.s });
+  function histRows(e, q, v) {
+    return e.mods.filter((m) => sideMatch(histSide(m), v) && (!q || (m.n + ' ' + m.f + ' ' + m.v).toLowerCase().indexOf(q) !== -1))
+      .map((m) => ({ path: histLine(m), side: m.s, size: m.v || '', state: '', label: '' }));
   }
   function histCsvLines(entries) {
-    const head = ['pack', 'pack version', 'source', 'minecraft', 'loader', 'opened', 'mod', 'file', 'mod version'];
+    const head = ['pack', 'pack version', 'source', 'minecraft', 'loader', 'opened', 'mod', 'file', 'mod version', 'side'];
     const lines = [head.join(',')];
-    entries.forEach((e) => e.mods.forEach((m) => lines.push([e.name, e.version, HIST_KIND[e.kind] || e.kind, e.mc, e.loader, new Date(e.ts).toISOString(), m.n, m.f, m.v].map(csvCell).join(','))));
+    entries.forEach((e) => e.mods.forEach((m) => lines.push([e.name, e.version, HIST_KIND[e.kind] || e.kind, e.mc, e.loader, new Date(e.ts).toISOString(), m.n, m.f, m.v, m.s || 'unknown'].map(csvCell).join(','))));
     return lines;
   }
-  function histDetails(e, q) {
+  function histDetails(e, q, v) {
     const det = el('details', 'hentry');
     const sum = el('summary');
     sum.appendChild(el('span', 'hname', e.name + (e.version ? '  v' + e.version : '')));
@@ -1978,7 +2014,7 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       body.appendChild(el('p', 'muted', e.fileName + ' (' + fmtBytes(e.fileSize || 0) + ')'));
       if (!e.namesKnown && e.kind !== 'instance') body.appendChild(el('p', 'muted', e.kind === 'cf' ? 'Real mod names appear here after the pack has been looked up on CurseForge.' : 'File names only. Use Inspect a pack to add the real mod names.'));
       if (e.actions && e.actions.length) body.appendChild(el('p', 'muted', e.actions.map((a) => a.t + ' (' + histWhen(a.ts) + ')').join('  ·  ')));
-      const rows = histRows(e, q);
+      const rows = histRows(e, q, v);
       const act = el('div', 'actions');
       const mk = (label, fn) => { const b = el('button', 'btn ghost', label); b.type = 'button'; b.addEventListener('click', fn); act.appendChild(b); return b; };
       mk('Copy mod list', async () => {
@@ -1988,26 +2024,30 @@ h3.sect { margin: 0; font-size: 0.78rem; text-transform: uppercase; letter-spaci
       mk('Save as .csv', () => saveBlob(new Blob(['\ufeff' + histCsvLines([e]).join('\r\n')], { type: 'text/csv' }), slug(e.name) + '-mods.csv'));
       mk('Remove from history', () => { Hist.items = Hist.items.filter((x) => x !== e); Hist.open.delete(e.id); persistHist(); renderHist(); });
       body.appendChild(act);
-      if (q) body.appendChild(el('p', 'muted', rows.length + ' of ' + e.mods.length + ' mods match the search.'));
+      if (q || v !== 'all') body.appendChild(el('p', 'muted', rows.length + ' of ' + e.mods.length + ' mods match.'));
       const host = el('div', 'vlist'); host.setAttribute('role', 'list'); host.setAttribute('aria-label', 'Mods in ' + e.name);
       body.appendChild(host);
-      new VList(host, { noSide: true }).set(rows);
+      const vl = new VList(host); vl.sideView = v; vl.set(rows);
     };
     det.addEventListener('toggle', () => { if (det.open) { Hist.open.add(e.id); build(); } else Hist.open.delete(e.id); });
     if (Hist.open.has(e.id)) { det.open = true; build(); }
     return det;
   }
   function renderHist() {
-    const q = $('#h-q').value.trim().toLowerCase();
-    const shown = Hist.items.filter((e) => !q || (e.name + ' ' + e.fileName).toLowerCase().indexOf(q) !== -1 || e.mods.some((m) => (m.n + ' ' + m.f).toLowerCase().indexOf(q) !== -1));
+    const q = $('#h-q').value.trim().toLowerCase(), v = $('#h-side').value || 'all';
+    const everyMod = []; Hist.items.forEach((e) => e.mods.forEach((m) => everyMod.push(histSide(m))));
+    fillSides('h', everyMod);
+    const shown = Hist.items.filter((e) => (!q || (e.name + ' ' + e.fileName).toLowerCase().indexOf(q) !== -1 || e.mods.some((m) => (m.n + ' ' + m.f).toLowerCase().indexOf(q) !== -1))
+      && (v === 'all' || e.mods.some((m) => sideMatch(histSide(m), v))));
     $('#h-count').textContent = Hist.items.length + ' pack' + (Hist.items.length === 1 ? '' : 's');
     $('#h-empty').hidden = Hist.items.length > 0;
     $('#h-none').hidden = !(Hist.items.length && !shown.length);
     $('#h-volatile').hidden = !Hist.volatile;
     const host = $('#h-list'); host.textContent = '';
-    shown.forEach((e) => host.appendChild(histDetails(e, q)));
+    shown.forEach((e) => host.appendChild(histDetails(e, q, v)));
   }
   $('#h-q').addEventListener('input', renderHist);
+  $('#h-side').addEventListener('change', renderHist);
   $('#h-csv').addEventListener('click', () => {
     if (!Hist.items.length) return;
     saveBlob(new Blob(['\ufeff' + histCsvLines(Hist.items).join('\r\n')], { type: 'text/csv' }), 'packshift-history.csv');
